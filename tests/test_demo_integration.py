@@ -100,3 +100,44 @@ async def test_normal_flow_and_attack_scenarios(temp_runtime_dir: Path) -> None:
         assert replay.status_code == 200
         assert replay.json()["first"]["status_code"] == 200
         assert replay.json()["second"]["status_code"] == 401
+
+
+@pytest.mark.anyio
+async def test_agent_registration_succeeds_when_registry_requires_token(temp_runtime_dir: Path) -> None:
+    settings = build_settings(temp_runtime_dir)
+    settings = DemoSettings(
+        root_dir=settings.root_dir,
+        runtime_dir=settings.runtime_dir,
+        registry_path=settings.registry_path,
+        database_path=settings.database_path,
+        metadata_cache_path=settings.metadata_cache_path,
+        registry_base_url=settings.registry_base_url,
+        registry_publish_url=settings.registry_publish_url,
+        registry_token="demo-token",
+        console_port=settings.console_port,
+        host=settings.host,
+        organization=settings.organization,
+        agents=settings.agents,
+    )
+    os.environ["AGENT_REGISTRY_PATH"] = str(settings.registry_path)
+    os.environ["AGENT_REGISTRY_TOKEN"] = "demo-token"
+    registry_app = create_registry_app()
+    apps: dict[str, object] = {"registry.local": registry_app}
+    transport = HostRouterTransport(apps)
+
+    def client_factory() -> httpx.AsyncClient:
+        return httpx.AsyncClient(transport=transport)
+
+    intake_spec = settings.agents["intake-agent"]
+    apps[intake_spec.domain] = create_agent_app("intake-agent", settings, http_client_factory=client_factory)
+
+    async with httpx.AsyncClient(transport=transport, base_url=intake_spec.base_url) as client:
+        response = await client.get("/identity")
+        assert response.status_code == 200
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://registry.local") as client:
+        registry_document = await client.get("/.well-known/agent.json")
+    assert registry_document.status_code == 200
+    payload = registry_document.json()
+    assert len(payload["agents"]) == 1
+    assert payload["agents"][0]["agent_id"] == "agent://127.0.0.1:8101/intake-agent"

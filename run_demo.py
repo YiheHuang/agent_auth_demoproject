@@ -47,6 +47,7 @@ def build_env() -> dict[str, str]:
     else:
         env.setdefault("DEMO_REGISTRY_URL", "http://192.144.228.237/.well-known/agent.json")
         env.setdefault("DEMO_REGISTRY_PUBLISH_URL", "http://192.144.228.237/registry/agents")
+        env.setdefault("DEMO_REGISTRY_TOKEN", "123")
     env.setdefault("DEMO_RUNTIME_DIR", str(ROOT / "runtime"))
     return env
 

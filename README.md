@@ -38,7 +38,15 @@ python run_demo.py
 
 - 发布默认写入：`http://192.144.228.237/registry/agents`
 - 验签默认读取：`http://192.144.228.237/.well-known/agent.json`
+- 默认会随发布请求附带 demo registry token：`123`
 - 本地 `runtime/agents/*/metadata/.well-known/agent.json` 仍然保留，但它只作为 agent 启动时的本地缓存与签名材料，不作为跨 agent 验签的权威来源
+
+如果你需要覆盖默认 token，可以设置：
+
+```bash
+set DEMO_REGISTRY_TOKEN=你的token
+python run_demo.py
+```
 
 如果你要把 demo 临时切回本地 registry，可以手动设置：
 
