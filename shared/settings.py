@@ -4,6 +4,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+DEFAULT_REMOTE_REGISTRY_URL = "http://192.144.228.237/.well-known/agent.json"
+DEFAULT_REMOTE_REGISTRY_PUBLISH_URL = "http://192.144.228.237/registry/agents"
+DEFAULT_REMOTE_REGISTRY_TOKEN = "123"
+
 
 @dataclass(frozen=True, slots=True)
 class AgentSpec:
@@ -81,6 +85,9 @@ def get_demo_settings() -> DemoSettings:
     registry_base_url = os.getenv("DEMO_REGISTRY_URL", "http://192.144.228.237/.well-known/agent.json")
     registry_publish_url = os.getenv("DEMO_REGISTRY_PUBLISH_URL", "http://192.144.228.237/registry/agents/publish")
     registry_path = Path(os.getenv("AGENT_REGISTRY_PATH", runtime_dir / "registry" / ".well-known" / "agent.json"))
+    registry_token = os.getenv("DEMO_REGISTRY_TOKEN") or os.getenv("AGENT_REGISTRY_TOKEN")
+    if registry_token is None and registry_publish_url == DEFAULT_REMOTE_REGISTRY_PUBLISH_URL:
+        registry_token = DEFAULT_REMOTE_REGISTRY_TOKEN
     agents = {
         "intake-agent": AgentSpec("intake-agent", 8101, "Intake Agent"),
         "triage-agent": AgentSpec("triage-agent", 8102, "Triage Agent"),
