@@ -46,24 +46,30 @@ class DemoAgentRuntime:
             if self.initialized:
                 return
             agent_dir = self.settings.agent_dir(self.spec.role)
-            keys_dir = self.settings.agent_keys_dir(self.spec.role)
             metadata_dir = self.settings.agent_metadata_dir(self.spec.role)
             agent_dir.mkdir(parents=True, exist_ok=True)
-            agent = AgentInstance.create(
+            agent = AgentInstance.from_vault(
                 domain=self.spec.domain,
                 name=self.spec.role,
                 organization=self.settings.organization,
                 endpoint=self.spec.endpoint,
+                vault_addr=_require(self.settings.vault_addr, "DEMO_VAULT_ADDR"),
+                vault_token_file=self.settings.vault_token_file,
+                vault_token=self.settings.vault_token,
+                allow_insecure_raw_token=self.settings.allow_insecure_vault_token,
+                transit_mount=self.settings.vault_transit_mount,
+                key_name=_require(self.settings.agent_kms_key_id(self.spec.role), f"{self.spec.role} Vault key"),
+                namespace=self.settings.vault_namespace,
+                verify=self.settings.vault_verify(),
                 capabilities=["ticket-workflow", "publish", "sign", "verify"],
                 environment="demo",
             )
-            agent.save_keys(keys_dir)
             agent.export_metadata(metadata_dir)
             async with self.http_client_factory() as client:
                 await agent.publish(
                     registry_url=self.settings.registry_publish_url,
-                    publisher=self.spec.role,
-                    token=self.settings.registry_token,
+                    client_id=_require(self.settings.registry_client_id, "DEMO_REGISTRY_CLIENT_ID"),
+                    api_key=_require(self.settings.registry_api_key, "DEMO_REGISTRY_API_KEY"),
                     http_client=client,
                 )
             self.agent = agent
@@ -352,3 +358,9 @@ async def _process_verified_task(runtime: DemoAgentRuntime, task: AgentTask, sou
         return AgentTaskResult(handled_by=role, status=status)
 
     raise HTTPException(status_code=400, detail=f"Unhandled role/action: {role}/{task.action}")
+
+
+def _require(value: str | None, env_name: str) -> str:
+    if not value:
+        raise RuntimeError(f"{env_name} is required")
+    return value

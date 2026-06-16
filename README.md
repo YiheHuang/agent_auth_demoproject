@@ -1,94 +1,103 @@
 # Agent Auth Demo Project
 
-一个真实可运行的多 Agent 工单协作演示系统，用来展示 `agent_auth_sdk` 的核心能力：
+这个 demo 用来真实展示 `agent_auth_sdk` 的核心价值：多 agent 协作时，谁在发消息、谁被信任、谁被拒绝、为什么被拒绝，都能被直观看到。
 
-- Agent 身份创建与中心 registry 发布
-- Agent 间签名 HTTP 调用
-- 基于中心 registry 的身份解析与验签
-- 未注册 Agent、篡改签名、nonce 重放等攻击场景拦截
+当前正式安全模型：
 
-## 结构
+- 所有正式签名能力均使用开发者自己的 HashiCorp Vault Transit
+- 不使用本地私钥文件作为正式路径
+- 所有跨 agent HTTP 请求都要验签
+- 所有 agent metadata 都发布到中心 registry
 
-- `apps/console/`：Web 控制台与聚合 API
-- `apps/agents/`：4 个 agent 服务
-- `shared/`：共享模型、规则、存储、配置
-- `tests/`：单元测试与集成测试
-- `run_demo.py`：本机一键启动入口
+## 运行前准备
 
-## 运行
-
-先确保同级目录存在 `agent_auth_sdk` 仓库源码。
+先安装依赖：
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
 pip install -e ..\agent_auth_sdk
-python run_demo.py
 ```
 
-启动后访问：
+本地 Vault 演示配置：
 
-- 控制台：`http://127.0.0.1:8010`
-- 服务器 registry：`http://192.144.228.237/.well-known/agent.json`
+```bash
+vault server -dev -dev-root-token-id=root
+set VAULT_ADDR=http://127.0.0.1:8200
+set VAULT_TOKEN=root
+echo root > runtime\vault-token.txt
+vault secrets enable transit
+vault write -f transit/keys/intake-agent type=ecdsa-p256
+vault write -f transit/keys/triage-agent type=ecdsa-p256
+vault write -f transit/keys/resolver-agent type=ecdsa-p256
+vault write -f transit/keys/approval-agent type=ecdsa-p256
+```
 
-## Registry 设计
+demo 环境变量：
 
-这个 demo 现在默认使用服务器上的中心 registry，而不是本地 `runtime/registry/.well-known/agent.json` 作为权威数据源。
+```bash
+set DEMO_REGISTRY_CLIENT_ID=developer-a
+set DEMO_REGISTRY_API_KEY=your-registry-api-key
+set DEMO_VAULT_ADDR=http://127.0.0.1:8200
+set DEMO_VAULT_TOKEN_FILE=runtime\vault-token.txt
+set DEMO_VAULT_TRANSIT_MOUNT=transit
+set DEMO_INTAKE_KMS_KEY_ID=intake-agent
+set DEMO_TRIAGE_KMS_KEY_ID=triage-agent
+set DEMO_RESOLVER_KMS_KEY_ID=resolver-agent
+set DEMO_APPROVAL_KMS_KEY_ID=approval-agent
+```
 
-- 发布默认写入：`http://192.144.228.237/registry/agents`
-- 验签默认读取：`http://192.144.228.237/.well-known/agent.json`
-- 本地 `runtime/agents/*/metadata/.well-known/agent.json` 仍然保留，但它只作为 agent 启动时的本地缓存与签名材料，不作为跨 agent 验签的权威来源
+这里的 `DEMO_*_KMS_KEY_ID` 表示 Vault Transit key name。
 
-如果你要把 demo 临时切回本地 registry，可以手动设置：
+生产或准生产环境不要设置 `DEMO_VAULT_TOKEN`。如果只是本地临时演示，可以显式设置 `DEMO_ALLOW_INSECURE_VAULT_TOKEN=1` 后再使用 `DEMO_VAULT_TOKEN=root`。
+
+如果你想用本地 registry 调试：
 
 ```bash
 set DEMO_USE_LOCAL_REGISTRY=1
+```
+
+## 启动方式
+
+```bash
 python run_demo.py
 ```
 
-## 运行流程
+启动成功后：
 
-### 正常流程
+- Console: `http://127.0.0.1:8010`
+- Registry: 本地模式为 `http://127.0.0.1:8008/.well-known/agent.json`
+- 服务器模式默认为 `http://192.144.228.237/.well-known/agent.json`，请用 `DEMO_REGISTRY_URL` 和 `DEMO_REGISTRY_PUBLISH_URL` 指向真实 registry
 
-1. 启动 `run_demo.py` 后，会自动拉起 4 个 agent 和 Web 控制台，并默认连接服务器 registry。
-2. 每个 agent 启动时会自动生成或读取本地密钥，并向服务器 registry 发布自己的 metadata。
-3. 用户在控制台创建工单后，工单会按如下路径流转：
-   - `user -> intake-agent`
-   - `intake-agent -> triage-agent`
-   - 普通工单：`triage-agent -> resolver-agent`
-   - 高风险工单：`triage-agent -> approval-agent -> resolver-agent`
-4. 每次 agent 间 HTTP 调用都会先签名，再由目标 agent 基于服务器 registry 完成身份解析与验签。
-5. 控制台会同步展示：
-   - 工单状态变化
-   - 时间线中的每一步流转
-   - 认证事件面板中的验签成功记录
-   - Agent 注册表中的已注册身份
-   - 以上所有长列表均支持分页，避免页面过长
+## 正常业务流程
 
-### 被攻击/异常流程
+1. 用户在控制台创建工单。
+2. `intake-agent` 接收工单并做初步分类。
+3. `intake-agent` 用自己的 Vault Transit key 对请求签名，发送给 `triage-agent`。
+4. `triage-agent` 从 registry 解析发送方 metadata，并验签。
+5. 普通工单流向 `resolver-agent`；高风险工单先进入 `approval-agent` 再转 `resolver-agent`。
+6. 所有链路上的成功验签事件，都会写入时间线和认证事件面板。
+7. 最终工单进入 `resolved` 或其他明确状态。
 
-控制台右上角的“攻击演示面板”提供 3 个异常场景：
+## 攻击演示流程
 
-1. 未注册 Agent 攻击
-   - 构造一个没有发布到 registry 的伪 agent
-   - 伪 agent 尝试向 `triage-agent` 发起签名请求
-   - 由于中心仓库中找不到其 metadata，请求会被拒绝
+控制台提供 5 种攻击演示：
 
-2. 签名篡改攻击
-   - 用合法 agent 对原始消息签名
-   - 发送时偷偷篡改消息内容，但保留原签名
-   - 目标 agent 会返回 `SIGNATURE_INVALID`
+1. 未注册 Agent 攻击：没有发布到 registry 的伪 agent 发请求，目标 agent 因无法解析身份而拒绝。
+2. 签名篡改攻击：先对原始消息签名，再发送被篡改的请求体，目标 agent 返回 `SIGNATURE_INVALID`。
+3. Nonce 重放攻击：重复发送同一组签名头，目标 agent 第二次返回 `NONCE_REPLAYED`。
+4. 盗取 API Key 发布攻击：攻击者拿到 registry API key，但没有目标 agent 对应的签名 key，发布被拒绝。
+5. Owner 冲突发布攻击：非 owner developer 试图更新已绑定的 agent，registry 返回 `OWNER_MISMATCH`。
 
-3. Nonce 重放攻击
-   - 用相同 nonce 重复发送两次同一请求
-   - 首次请求通过，第二次会被识别为重放
-   - 目标 agent 会返回 `NONCE_REPLAYED`
+## 职责边界
 
-这些异常都会记录到认证事件面板与工单时间线中，用来直观证明 `agent_auth_sdk` 在真实多 agent 系统中的价值。
+`agent_auth_sdk` 是 SDK，不托管 Vault。开发者需要自己安装、初始化、解封、授权并备份 Vault；SDK 只使用开发者提供的 Vault token 调用 `read_key` 与 `sign_data`。
 
 ## 测试
 
 ```bash
 pytest
 ```
+
+如果没有配置真实 Vault，依赖真实 Vault 的 demo 集成测试会显式 `skip`。

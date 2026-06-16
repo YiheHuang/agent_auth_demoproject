@@ -12,8 +12,8 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from agent_auth_sdk import AgentInstance
-from shared.models import AgentTask, CreateTicketRequest, TicketEvent
+from agent_auth_sdk import AgentInstance, sign_registry_publish_request
+from shared.models import AgentTask, AuthEvent, CreateTicketRequest, TicketEvent
 from shared.settings import DemoSettings, get_demo_settings
 from shared.store import DemoStore, utc_now
 
@@ -125,13 +125,22 @@ def create_console_app(
 
     @app.post("/api/scenarios/unregistered")
     async def attack_unregistered() -> dict:
-        rogue = AgentInstance.create(
+        rogue = AgentInstance.from_vault(
             domain="127.0.0.1:8999",
             name="rogue-agent",
             organization="Rogue Org",
             endpoint="http://127.0.0.1:8999/tasks/handle",
+            vault_addr=_require(settings.vault_addr, "DEMO_VAULT_ADDR"),
+            vault_token_file=settings.vault_token_file,
+            vault_token=settings.vault_token,
+            allow_insecure_raw_token=settings.allow_insecure_vault_token,
+            transit_mount=settings.vault_transit_mount,
+            key_name=_require(settings.agent_kms_key_id("approval-agent"), "DEMO_APPROVAL_KMS_KEY_ID"),
+            namespace=settings.vault_namespace,
+            verify=settings.vault_verify(),
             capabilities=["sign"],
             environment="attack",
+            kid="rogue-unregistered",
         )
         body = AgentTask(ticket_id=_latest_ticket_id(store), action="replay_probe").model_dump(mode="json")
         target_url = settings.agents["triage-agent"].endpoint
@@ -162,6 +171,85 @@ def create_console_app(
             second = await client.post(target_url, json=body, headers=signed.headers)
         return {"first": {"status_code": first.status_code, "payload": first.json()}, "second": {"status_code": second.status_code, "payload": second.json()}}
 
+    @app.post("/api/scenarios/stolen-api-key")
+    async def attack_stolen_api_key() -> dict:
+        rogue = AgentInstance.from_vault(
+            domain="127.0.0.1:8998",
+            name="intake-agent",
+            organization="Rogue Org",
+            endpoint="http://127.0.0.1:8998/tasks/handle",
+            vault_addr=_require(settings.vault_addr, "DEMO_VAULT_ADDR"),
+            vault_token_file=settings.vault_token_file,
+            vault_token=settings.vault_token,
+            allow_insecure_raw_token=settings.allow_insecure_vault_token,
+            transit_mount=settings.vault_transit_mount,
+            key_name=_require(settings.agent_kms_key_id("approval-agent"), "DEMO_APPROVAL_KMS_KEY_ID"),
+            namespace=settings.vault_namespace,
+            verify=settings.vault_verify(),
+            capabilities=["publish"],
+            environment="attack",
+            kid="rogue-stolen-api",
+        )
+        legitimate = _load_local_agent("intake-agent", settings)
+        payload = {
+            "agent_id": legitimate.agent_id,
+            "metadata": rogue.metadata.model_dump(mode="json"),
+            "publish_intent": "upsert_metadata",
+        }
+        signed = await sign_registry_publish_request(
+            path="/registry/agents/publish",
+            host=_registry_host(settings.registry_publish_url),
+            body=payload,
+            agent_id=legitimate.agent_id,
+            client_id=_require(settings.registry_client_id, "DEMO_REGISTRY_CLIENT_ID"),
+            signer=rogue.signer,
+        )
+        headers = {
+            "authorization": f"Bearer {_require(settings.registry_api_key, 'DEMO_REGISTRY_API_KEY')}",
+            **signed.headers,
+        }
+        async with factory() as client:
+            response = await client.post(settings.registry_publish_url, json=payload, headers=headers)
+        _record_registry_attack(
+            store,
+            scenario="stolen_api_key_publish",
+            source_agent_id=rogue.agent_id,
+            status_code=response.status_code,
+            payload=response.json(),
+        )
+        return {"status_code": response.status_code, "payload": response.json()}
+
+    @app.post("/api/scenarios/owner-conflict")
+    async def attack_owner_conflict() -> dict:
+        legitimate = _load_local_agent("intake-agent", settings)
+        payload = {
+            "agent_id": legitimate.agent_id,
+            "metadata": legitimate.metadata.model_dump(mode="json"),
+            "publish_intent": "upsert_metadata",
+        }
+        signed = await sign_registry_publish_request(
+            path="/registry/agents/publish",
+            host=_registry_host(settings.registry_publish_url),
+            body=payload,
+            agent_id=legitimate.agent_id,
+            client_id="rogue-client",
+            signer=legitimate.signer,
+        )
+        headers = {
+            "authorization": "Bearer rogue-api-key",
+            **signed.headers,
+        }
+        async with factory() as client:
+            response = await client.post(settings.registry_publish_url, json=payload, headers=headers)
+        _record_registry_attack(
+            store,
+            scenario="owner_conflict_publish",
+            source_agent_id=legitimate.agent_id,
+            status_code=response.status_code,
+            payload=response.json(),
+        )
+        return {"status_code": response.status_code, "payload": response.json()}
+
     return app
 
 
@@ -173,23 +261,73 @@ def _latest_ticket_id(store: DemoStore) -> str:
     return tickets[0].ticket_id
 
 
+def _record_registry_attack(
+    store: DemoStore,
+    *,
+    scenario: str,
+    source_agent_id: str | None,
+    status_code: int,
+    payload: dict,
+) -> None:
+    ticket_id = _latest_ticket_id(store)
+    reason = str(payload.get("detail") or payload)
+    result = "rejected" if status_code >= 400 else "verified"
+    store.add_auth_event(
+        AuthEvent(
+            source_agent_id=source_agent_id,
+            target_agent="registry",
+            result=result,
+            error_code=reason if status_code >= 400 else None,
+            detail=f"{scenario} returned HTTP {status_code}: {reason}",
+            created_at=utc_now(),
+        )
+    )
+    store.add_ticket_event(
+        TicketEvent(
+            ticket_id=ticket_id,
+            event_type=scenario,
+            from_agent=source_agent_id or "unknown",
+            to_agent="registry",
+            verification_result=reason if status_code >= 400 else "accepted",
+            reason=reason,
+            payload_summary=f"registry publish attempt returned HTTP {status_code}",
+            created_at=utc_now(),
+        )
+    )
+
+
 def _load_local_agent(role: str, settings: DemoSettings) -> AgentInstance:
     metadata_path = settings.agent_metadata_dir(role) / ".well-known" / "agent.json"
-    private_key_path = settings.agent_keys_dir(role) / "private_key.pem"
-    public_key_path = settings.agent_keys_dir(role) / "public_key.pem"
-    if not metadata_path.exists() or not private_key_path.exists() or not public_key_path.exists():
+    if not metadata_path.exists():
         raise HTTPException(status_code=503, detail=f"{role} identity is not ready yet")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    return AgentInstance.create(
+    return AgentInstance.from_vault(
         domain=metadata["domain"],
         name=metadata["name"],
         organization=metadata["organization"],
         endpoint=metadata["endpoint"],
+        vault_addr=_require(settings.vault_addr, "DEMO_VAULT_ADDR"),
+        vault_token_file=settings.vault_token_file,
+        vault_token=settings.vault_token,
+        allow_insecure_raw_token=settings.allow_insecure_vault_token,
+        transit_mount=settings.vault_transit_mount,
+        key_name=_require(settings.agent_kms_key_id(role), f"{role} Vault key"),
+        namespace=settings.vault_namespace,
+        verify=settings.vault_verify(),
         capabilities=metadata["capabilities"],
         environment=metadata.get("environment"),
-        private_key_pem=private_key_path.read_text(encoding="utf-8"),
-        public_key_pem=public_key_path.read_text(encoding="utf-8"),
+        kid=metadata["keys"][0]["kid"],
     )
+
+
+def _registry_host(registry_publish_url: str) -> str:
+    return __import__("urllib.parse").parse.urlparse(registry_publish_url).netloc
+
+
+def _require(value: str | None, env_name: str) -> str:
+    if not value:
+        raise HTTPException(status_code=503, detail=f"{env_name} is required")
+    return value
 
 
 def _html() -> str:
@@ -246,6 +384,8 @@ def _html() -> str:
         <button class="alt" onclick="runScenario('unregistered')">未注册 Agent 攻击</button>
         <button class="alt" onclick="runScenario('tampered')">签名篡改攻击</button>
         <button class="alt" onclick="runScenario('replay')">Nonce 重放攻击</button>
+        <button class="alt" onclick="runScenario('stolen-api-key')">盗取 API Key 发布攻击</button>
+        <button class="alt" onclick="runScenario('owner-conflict')">Owner 冲突发布攻击</button>
         <pre id="scenario-output">等待执行场景...</pre>
       </section>
     </div>

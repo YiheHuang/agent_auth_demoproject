@@ -33,7 +33,17 @@ class DemoSettings:
     metadata_cache_path: Path
     registry_base_url: str
     registry_publish_url: str
-    registry_token: str | None
+    registry_client_id: str | None
+    registry_api_key: str | None
+    vault_addr: str | None
+    vault_token_file: str | None
+    vault_token: str | None
+    allow_insecure_vault_token: bool
+    vault_transit_mount: str
+    vault_namespace: str | None
+    vault_ca_cert: str | None
+    vault_skip_verify: bool
+    agent_kms_keys: dict[str, str | None]
     console_port: int
     host: str
     organization: str
@@ -54,6 +64,14 @@ class DemoSettings:
     def console_url(self) -> str:
         return f"http://{self.host}:{self.console_port}"
 
+    def agent_kms_key_id(self, role: str) -> str | None:
+        return self.agent_kms_keys.get(role)
+
+    def vault_verify(self) -> bool | str:
+        if self.vault_skip_verify:
+            return False
+        return self.vault_ca_cert or True
+
 
 def get_demo_settings() -> DemoSettings:
     root = Path(__file__).resolve().parents[1]
@@ -61,7 +79,7 @@ def get_demo_settings() -> DemoSettings:
     host = os.getenv("DEMO_HOST", "127.0.0.1")
     registry_port = int(os.getenv("AGENT_REGISTRY_PORT", "8008"))
     registry_base_url = os.getenv("DEMO_REGISTRY_URL", "http://192.144.228.237/.well-known/agent.json")
-    registry_publish_url = os.getenv("DEMO_REGISTRY_PUBLISH_URL", "http://192.144.228.237/registry/agents")
+    registry_publish_url = os.getenv("DEMO_REGISTRY_PUBLISH_URL", "http://192.144.228.237/registry/agents/publish")
     registry_path = Path(os.getenv("AGENT_REGISTRY_PATH", runtime_dir / "registry" / ".well-known" / "agent.json"))
     agents = {
         "intake-agent": AgentSpec("intake-agent", 8101, "Intake Agent"),
@@ -77,7 +95,22 @@ def get_demo_settings() -> DemoSettings:
         metadata_cache_path=runtime_dir / "metadata_cache.sqlite3",
         registry_base_url=registry_base_url,
         registry_publish_url=registry_publish_url,
-        registry_token=os.getenv("AGENT_REGISTRY_TOKEN") or None,
+        registry_client_id=os.getenv("DEMO_REGISTRY_CLIENT_ID") or None,
+        registry_api_key=os.getenv("DEMO_REGISTRY_API_KEY") or None,
+        vault_addr=os.getenv("DEMO_VAULT_ADDR") or None,
+        vault_token_file=os.getenv("DEMO_VAULT_TOKEN_FILE") or None,
+        vault_token=os.getenv("DEMO_VAULT_TOKEN") or None,
+        allow_insecure_vault_token=os.getenv("DEMO_ALLOW_INSECURE_VAULT_TOKEN", "0") == "1",
+        vault_transit_mount=os.getenv("DEMO_VAULT_TRANSIT_MOUNT", "transit"),
+        vault_namespace=os.getenv("DEMO_VAULT_NAMESPACE") or None,
+        vault_ca_cert=os.getenv("DEMO_VAULT_CA_CERT") or None,
+        vault_skip_verify=os.getenv("DEMO_VAULT_SKIP_VERIFY", "0") == "1",
+        agent_kms_keys={
+            "intake-agent": os.getenv("DEMO_INTAKE_KMS_KEY_ID"),
+            "triage-agent": os.getenv("DEMO_TRIAGE_KMS_KEY_ID"),
+            "resolver-agent": os.getenv("DEMO_RESOLVER_KMS_KEY_ID"),
+            "approval-agent": os.getenv("DEMO_APPROVAL_KMS_KEY_ID"),
+        },
         console_port=8010,
         host=host,
         organization="Agent Auth Demo",
