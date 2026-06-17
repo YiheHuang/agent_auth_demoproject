@@ -9,7 +9,7 @@ $env:DEMO_REGISTRY_PUBLISH_URL = "http://192.144.228.237/registry/agents/publish
 # Required real Vault configuration.
 # The token file should be written by Vault Agent or another trusted bootstrap process.
 $env:DEMO_VAULT_ADDR = "http://127.0.0.1:8200"
-$env:DEMO_VAULT_TOKEN_FILE = "C:\Users\Yihe Huang\FDU\agent_auth\agent_auth_demoproject\runtime\vault-token.txt"
+$env:DEMO_VAULT_TOKEN_FILE = "runtime\vault-token.txt"
 $env:DEMO_VAULT_TRANSIT_MOUNT = "transit"
 
 # Required Transit key names for the four demo agents.
