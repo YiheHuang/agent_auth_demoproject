@@ -4,13 +4,6 @@ param(
     [string]$VaultAddr = "http://127.0.0.1:8200",
     [string]$TransitMount = "transit",
     [string]$RuntimeDir = "runtime",
-    [string]$EnvScriptPath = "demo-local-env.ps1",
-    [string]$RegistryClientId = "huangyihe",
-    [string]$RegistryApiKey = "9_BwTK2z60WAsjE2rvRDNi6B069Nc1-cA7M7A7myJTI",
-    [string]$RegistryUrl = "http://192.144.228.237/.well-known/agent.json",
-    [string]$RegistryPublishUrl = "http://192.144.228.237/registry/agents/publish",
-    [switch]$UseLocalRegistry,
-    [switch]$ForceRewriteEnv,
     [switch]$ForceRewriteConfig,
     [switch]$NoStartServer
 )
@@ -28,15 +21,8 @@ $script:VaultInitPath = Join-Path $script:VaultRoot "init.json"
 $script:VaultRootTokenPath = Join-Path $script:VaultRoot "root-token.txt"
 $script:VaultUnsealKeyPath = Join-Path $script:VaultRoot "unseal-key.txt"
 $script:DemoVaultTokenPath = Join-Path $script:RuntimeRoot "vault-token.txt"
-$script:EnvScriptFullPath = Join-Path $script:ProjectRoot $EnvScriptPath
 $script:VaultServerLogPath = Join-Path $script:VaultLogsDir "server.log"
 $script:VaultServerErrPath = Join-Path $script:VaultLogsDir "server.err.log"
-$script:VaultKeyNames = @(
-    "intake-agent",
-    "triage-agent",
-    "resolver-agent",
-    "approval-agent"
-)
 
 function Write-Step {
     param([string]$Message)
@@ -256,52 +242,6 @@ function Ensure-TransitEnabled {
     Invoke-Vault -Arguments @("secrets", "enable", "-path=$TransitMount", "transit") -Token $Token
 }
 
-function Ensure-TransitKey {
-    param(
-        [string]$Token,
-        [string]$KeyName
-    )
-
-    try {
-        Invoke-VaultJson -Arguments @("read", "-format=json", "$TransitMount/keys/$KeyName") -Token $Token | Out-Null
-        Write-Step "Transit key 已存在: $KeyName"
-        return
-    }
-    catch {
-        Write-Step "创建 Transit key: $KeyName"
-        Invoke-Vault -Arguments @("write", "-f", "$TransitMount/keys/$KeyName", "type=ecdsa-p256") -Token $Token
-    }
-}
-
-function Write-DemoEnvScript {
-    $useLocalRegistryValue = if ($UseLocalRegistry) { "1" } else { "0" }
-    $registryUrlValue = if ($UseLocalRegistry) { "http://127.0.0.1:8008/.well-known/agent.json" } else { $RegistryUrl }
-    $registryPublishUrlValue = if ($UseLocalRegistry) { "http://127.0.0.1:8008/registry/agents/publish" } else { $RegistryPublishUrl }
-
-    if ((Test-Path -LiteralPath $script:EnvScriptFullPath) -and -not $ForceRewriteEnv) {
-        Write-Step "保留已有 env 脚本: $script:EnvScriptFullPath"
-        return
-    }
-
-    $envContent = @"
-\$env:DEMO_USE_LOCAL_REGISTRY = "$useLocalRegistryValue"
-\$env:DEMO_REGISTRY_CLIENT_ID = "$RegistryClientId"
-\$env:DEMO_REGISTRY_API_KEY = "$RegistryApiKey"
-\$env:DEMO_REGISTRY_URL = "$registryUrlValue"
-\$env:DEMO_REGISTRY_PUBLISH_URL = "$registryPublishUrlValue"
-\$env:DEMO_VAULT_ADDR = "$VaultAddr"
-\$env:DEMO_VAULT_TOKEN_FILE = "$RuntimeDir\vault-token.txt"
-\$env:DEMO_VAULT_TRANSIT_MOUNT = "$TransitMount"
-\$env:DEMO_INTAKE_KMS_KEY_ID = "intake-agent"
-\$env:DEMO_TRIAGE_KMS_KEY_ID = "triage-agent"
-\$env:DEMO_RESOLVER_KMS_KEY_ID = "resolver-agent"
-\$env:DEMO_APPROVAL_KMS_KEY_ID = "approval-agent"
-"@
-
-    Set-Content -LiteralPath $script:EnvScriptFullPath -Value $envContent -Encoding ascii
-    Write-Step "已生成 env 脚本: $script:EnvScriptFullPath"
-}
-
 New-Item -ItemType Directory -Force -Path $script:VaultDataDir | Out-Null
 New-Item -ItemType Directory -Force -Path $script:VaultLogsDir | Out-Null
 
@@ -314,15 +254,11 @@ Initialize-VaultIfNeeded -Status $status
 $status = Unseal-VaultIfNeeded
 $rootToken = Get-RootToken
 Ensure-TransitEnabled -Token $rootToken
-foreach ($keyName in $script:VaultKeyNames) {
-    Ensure-TransitKey -Token $rootToken -KeyName $keyName
-}
 Set-Content -LiteralPath $script:DemoVaultTokenPath -Value $rootToken -Encoding ascii
-Write-DemoEnvScript
 
 Write-Host ""
 Write-Host "完成。后续使用方式：" -ForegroundColor Green
-Write-Host "1. `. .\$EnvScriptPath`"
+Write-Host "1. `. .\demo-local-env.ps1`"
 Write-Host "2. `python run_demo.py`"
 Write-Host ""
 Write-Host "如需查看 Vault 日志："

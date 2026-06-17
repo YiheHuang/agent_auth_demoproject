@@ -12,7 +12,8 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from agent_auth_sdk import AgentInstance, sign_registry_publish_request
+from agent_auth_sdk import AgentInstance
+from agent_auth_sdk.registry_security import sign_registry_publish_request
 from shared.models import AgentTask, AuthEvent, CreateTicketRequest, TicketEvent
 from shared.settings import DemoSettings, get_demo_settings
 from shared.store import DemoStore, utc_now

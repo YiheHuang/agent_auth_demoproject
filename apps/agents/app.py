@@ -63,6 +63,7 @@ class DemoAgentRuntime:
                 verify=self.settings.vault_verify(),
                 capabilities=["ticket-workflow", "publish", "sign", "verify"],
                 environment="demo",
+                auto_create_key=True,
             )
             agent.export_metadata(metadata_dir)
             async with self.http_client_factory() as client:

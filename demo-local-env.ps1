@@ -1,19 +1,25 @@
-$env:DEMO_USE_LOCAL_REGISTRY = "0"
-$env:DEMO_REGISTRY_CLIENT_ID = "huangyihe"
-$env:DEMO_REGISTRY_API_KEY = "9_BwTK2z60WAsjE2rvRDNi6B069Nc1-cA7M7A7myJTI"
+# Agent Auth Demo — 本地环境变量（静态脚本，提交到 git）
+# 使用方式： . .\demo-local-env.ps1
 
-# Remote registry currently uses HTTP.
-$env:DEMO_REGISTRY_URL = "http://192.144.228.237/.well-known/agent.json"
-$env:DEMO_REGISTRY_PUBLISH_URL = "http://192.144.228.237/registry/agents/publish"
-
-# Required real Vault configuration.
-# The token file should be written by Vault Agent or another trusted bootstrap process.
-$env:DEMO_VAULT_ADDR = "http://127.0.0.1:8200"
-$env:DEMO_VAULT_TOKEN_FILE = "runtime\vault-token.txt"
+# --- Vault 连接 ---
+$env:DEMO_VAULT_ADDR          = "http://127.0.0.1:8200"
+$env:DEMO_VAULT_TOKEN_FILE    = "runtime\vault-token.txt"
 $env:DEMO_VAULT_TRANSIT_MOUNT = "transit"
 
-# Required Transit key names for the four demo agents.
-$env:DEMO_INTAKE_KMS_KEY_ID = "intake-agent"
-$env:DEMO_TRIAGE_KMS_KEY_ID = "triage-agent"
-$env:DEMO_RESOLVER_KMS_KEY_ID = "resolver-agent"
-$env:DEMO_APPROVAL_KMS_KEY_ID = "approval-agent"
+# --- Agent Vault key 名称（SDK 启动时通过 auto_create_key 自动创建） ---
+$env:DEMO_INTAKE_KMS_KEY_ID    = "intake-agent"
+$env:DEMO_TRIAGE_KMS_KEY_ID    = "triage-agent"
+$env:DEMO_RESOLVER_KMS_KEY_ID  = "resolver-agent"
+$env:DEMO_APPROVAL_KMS_KEY_ID  = "approval-agent"
+
+# --- Registry 认证（远程 registry，使用 HTTP） ---
+$env:DEMO_USE_LOCAL_REGISTRY   = "0"
+$env:DEMO_REGISTRY_URL         = "http://192.144.228.237/.well-known/agent.json"
+$env:DEMO_REGISTRY_PUBLISH_URL = "http://192.144.228.237/registry/agents/publish"
+$env:DEMO_REGISTRY_CLIENT_ID   = "huangyihe"
+$env:DEMO_REGISTRY_API_KEY     = "9_BwTK2z60WAsjE2rvRDNi6B069Nc1-cA7M7A7myJTI"
+
+# --- 可选：切换到本地 registry ---
+# $env:DEMO_USE_LOCAL_REGISTRY   = "1"
+# $env:DEMO_REGISTRY_CLIENT_ID   = "demo-local-client"
+# $env:DEMO_REGISTRY_API_KEY     = "demo-local-api-key"

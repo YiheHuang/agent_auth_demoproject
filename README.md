@@ -29,8 +29,8 @@ pip install -e ..\agent_auth_sdk
 - 首次初始化 Vault，并保存 `init.json`、`root-token.txt`、`unseal-key.txt`
 - 自动解封 Vault
 - 启用 `transit` mount
-- 创建 4 个 demo agent 对应的 Transit key
-- 生成本机环境脚本 `demo-local-env.ps1`
+
+Agent 的 Transit key 由 SDK 在首次启动时自动创建（`auto_create_key=True`），无需脚本预创建。
 
 如果你需要显式指定 Vault 可执行文件：
 
@@ -38,16 +38,9 @@ pip install -e ..\agent_auth_sdk
 .\setup-persistent-vault.ps1 -VaultCommand "C:\path\to\vault.exe"
 ```
 
-如果想切到本地 registry：
-
-```powershell
-.\setup-persistent-vault.ps1 -UseLocalRegistry -ForceRewriteEnv
-```
-
 说明：
 
-- 脚本默认会保留已有的 `demo-local-env.ps1`；想重写就加 `-ForceRewriteEnv`
-- 脚本默认会复用已有的持久化数据，不会重建已有 Transit key
+- 脚本默认会复用已有的持久化数据
 - `runtime\` 已被 `.gitignore` 忽略，不会提交本机 Vault 数据
 
 ## 3. 加载环境并启动 demo
@@ -65,8 +58,8 @@ python run_demo.py
 
 ## 4. 常见文件
 
-- 环境脚本模板：[demo-real-env.ps1](/D:/FDU/agent_auth/agent_auth_demoproject/demo-real-env.ps1)
-- 一键配置脚本：[setup-persistent-vault.ps1](/D:/FDU/agent_auth/agent_auth_demoproject/setup-persistent-vault.ps1)
+- 环境变量脚本：[demo-local-env.ps1](demo-local-env.ps1)（静态，已提交到 git）
+- 一键配置脚本：[setup-persistent-vault.ps1](setup-persistent-vault.ps1)（Vault 运维）
 - 持久化 Vault 配置：`runtime\vault\config.hcl`
 - 运行 token 文件：`runtime\vault-token.txt`
 
@@ -94,3 +87,8 @@ pytest
 ```
 
 未配置真实 Vault 时，依赖真实 Vault 的集成测试会 `skip`。
+
+## 8. 相关文档
+
+- SDK 接口文档：[agent_auth_sdk/docs/API_REFERENCE.md](../agent_auth_sdk/docs/API_REFERENCE.md)
+- Vault 环境配置指南：[agent_auth_sdk/docs/VAULT_SETUP.md](../agent_auth_sdk/docs/VAULT_SETUP.md)
