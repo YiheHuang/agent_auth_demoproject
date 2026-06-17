@@ -18,7 +18,7 @@ $env:DEMO_USE_LOCAL_REGISTRY   = "0"
 $env:DEMO_REGISTRY_URL         = "http://192.144.228.237/.well-known/agent.json"
 $env:DEMO_REGISTRY_PUBLISH_URL = "http://192.144.228.237/registry/agents/publish"
 $env:DEMO_REGISTRY_CLIENT_ID   = "huangyihe"
-$env:DEMO_REGISTRY_API_KEY     = "9_BwTK2z60WAsjE2rvRDNi6B069Nc1-cA7M7A7myJTI"
+$env:DEMO_REGISTRY_API_KEY     = "T3r1fEoIvQUA9JQjgbsIjDcZC6-dTRb-IsJG7oZanNY"
 
 # --- 可选：切换到本地 registry ---
 # $env:DEMO_USE_LOCAL_REGISTRY   = "1"
