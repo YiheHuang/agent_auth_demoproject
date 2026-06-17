@@ -1,3 +1,10 @@
+"""Data models for the Multi-Agent Code Review & Security Audit System.
+
+Core entities:  CodeReview, ReviewFinding, ReviewReport, RiskItem, ReviewEvent
+Inter-agent:   AgentTask, AgentTaskResult
+Auth:          AuthEvent (unchanged from original)
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -7,30 +14,96 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 
-class Ticket(BaseModel):
-    ticket_id: str
+# -- Core domain models ------------------------------------------------------
+
+class CodeReview(BaseModel):
+    review_id: str
     title: str
-    description: str
-    category: str = "unknown"
-    priority: str = "normal"
-    status: str = "new"
-    current_agent: str = "intake-agent"
-    resolution: str | None = None
+    code: str
+    language: str = "unknown"
+    status: str = "submitted"  # submitted | analyzing | in_review | synthesizing | completed | failed
+    coordinator_analysis: str | None = None
+    overall_score: int | None = None  # 1-10
     created_at: datetime
     updated_at: datetime
 
 
-class TicketEvent(BaseModel):
+class ReviewFinding(BaseModel):
+    finding_id: str = Field(default_factory=lambda: str(uuid4()))
+    review_id: str
+    agent_role: str        # architecture | security | performance | compliance
+    category: str          # domain-specific (see categories in prompts)
+    severity: str          # critical | high | medium | low | info
+    title: str
+    description: str
+    recommendation: str
+    code_snippet: str | None = None
+    line_numbers: str | None = None  # e.g. "L42-L56"
+    created_at: datetime
+
+
+class RiskItem(BaseModel):
+    rank: int              # 1 = highest risk
+    severity: str
+    category: str
+    title: str
+    impact: str
+    mitigation: str
+
+
+class ReviewReport(BaseModel):
+    report_id: str = Field(default_factory=lambda: str(uuid4()))
+    review_id: str
+    overall_score: int     # 1-10
+    summary: str           # executive summary
+    architecture_score: int
+    security_score: int
+    performance_score: int
+    compliance_score: int
+    risk_items: list[RiskItem] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
+class ReviewEvent(BaseModel):
     event_id: str = Field(default_factory=lambda: str(uuid4()))
-    ticket_id: str
-    event_type: str
+    review_id: str
+    event_type: str        # user_submitted | coordinator_analyzed | agent_dispatched |
+                           # agent_received | finding_returned | report_synthesized |
+                           # review_completed | verification_failed
     from_agent: str
     to_agent: str
-    verification_result: str
+    verification_result: str  # verified | rejected | signed | n/a
     reason: str | None = None
     payload_summary: str
     created_at: datetime
 
+
+# -- Inter-agent communication models ----------------------------------------
+
+class AgentTask(BaseModel):
+    review_id: str
+    action: str            # review_architecture | review_security |
+                           # review_performance | review_compliance
+    code: str
+    language: str
+    context: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
+class AgentTaskResult(BaseModel):
+    ok: bool = True
+    handled_by: str        # agent role
+    review_id: str
+    action: str
+    score: int             # 1-10 domain score
+    summary: str           # 2-3 sentence domain summary in Chinese
+    findings: list[dict] = Field(default_factory=list)
+    # Each dict: {severity, category, title, description, recommendation,
+    #             code_snippet, line_numbers}
+
+
+# -- Auth events (unchanged) -------------------------------------------------
 
 class AuthEvent(BaseModel):
     event_id: str = Field(default_factory=lambda: str(uuid4()))
@@ -42,27 +115,9 @@ class AuthEvent(BaseModel):
     created_at: datetime
 
 
-class CreateTicketRequest(BaseModel):
+# -- Console request models --------------------------------------------------
+
+class SubmitReviewRequest(BaseModel):
     title: str
-    description: str
-
-
-class IntakeRequest(BaseModel):
-    ticket_id: str
-
-
-class AgentTask(BaseModel):
-    ticket_id: str
-    action: str
-    category: str | None = None
-    priority: str | None = None
-    risk_level: str | None = None
-    context: str | None = None
-    notes: list[str] = Field(default_factory=list)
-
-
-class AgentTaskResult(BaseModel):
-    ok: bool = True
-    handled_by: str
-    next_agent: str | None = None
-    status: str | None = None
+    code: str
+    language_hint: str | None = None

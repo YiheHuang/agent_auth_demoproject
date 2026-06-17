@@ -7,10 +7,11 @@ $env:DEMO_VAULT_TOKEN_FILE    = "runtime\vault-token.txt"
 $env:DEMO_VAULT_TRANSIT_MOUNT = "transit"
 
 # --- Agent Vault key 名称（SDK 启动时通过 auto_create_key 自动创建） ---
-$env:DEMO_INTAKE_KMS_KEY_ID    = "intake-agent"
-$env:DEMO_TRIAGE_KMS_KEY_ID    = "triage-agent"
-$env:DEMO_RESOLVER_KMS_KEY_ID  = "resolver-agent"
-$env:DEMO_APPROVAL_KMS_KEY_ID  = "approval-agent"
+$env:DEMO_COORDINATOR_KMS_KEY_ID  = "coordinator-agent"
+$env:DEMO_ARCHITECTURE_KMS_KEY_ID = "architecture-agent"
+$env:DEMO_SECURITY_KMS_KEY_ID     = "security-agent"
+$env:DEMO_PERFORMANCE_KMS_KEY_ID  = "performance-agent"
+$env:DEMO_COMPLIANCE_KMS_KEY_ID   = "compliance-agent"
 
 # --- Registry 认证（远程 registry，使用 HTTP） ---
 $env:DEMO_USE_LOCAL_REGISTRY   = "0"

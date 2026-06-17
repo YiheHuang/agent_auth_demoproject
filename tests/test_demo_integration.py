@@ -1,3 +1,15 @@
+"""Integration test: full code review flow + all 5 attack scenarios.
+
+Requires a running Vault instance with Transit engine.  Set:
+  DEMO_VAULT_ADDR, DEMO_VAULT_TOKEN (or DEMO_VAULT_TOKEN_FILE),
+  DEMO_ALLOW_INSECURE_VAULT_TOKEN=1 (for dev),
+  DEMO_COORDINATOR_KMS_KEY_ID, DEMO_ARCHITECTURE_KMS_KEY_ID,
+  DEMO_SECURITY_KMS_KEY_ID, DEMO_PERFORMANCE_KMS_KEY_ID,
+  DEMO_COMPLIANCE_KMS_KEY_ID, DEMO_LLM_API_KEY (optional)
+
+Without these, the test is skipped.
+"""
+
 from __future__ import annotations
 
 import os
@@ -11,7 +23,6 @@ from agent_auth_registry.storage import RegistryStore
 from apps.agents.app import create_agent_app
 from apps.console.app import create_console_app
 from agent_auth_sdk.registry_security import hash_api_key
-from shared.models import AgentTask
 from shared.settings import DemoSettings, get_demo_settings
 
 
@@ -34,10 +45,11 @@ def build_settings(temp_runtime_dir: Path) -> DemoSettings:
         "DEMO_VAULT_ADDR": os.getenv("DEMO_VAULT_ADDR"),
         "DEMO_VAULT_TOKEN_FILE": os.getenv("DEMO_VAULT_TOKEN_FILE"),
         "DEMO_VAULT_TOKEN": os.getenv("DEMO_VAULT_TOKEN"),
-        "DEMO_INTAKE_KMS_KEY_ID": os.getenv("DEMO_INTAKE_KMS_KEY_ID"),
-        "DEMO_TRIAGE_KMS_KEY_ID": os.getenv("DEMO_TRIAGE_KMS_KEY_ID"),
-        "DEMO_RESOLVER_KMS_KEY_ID": os.getenv("DEMO_RESOLVER_KMS_KEY_ID"),
-        "DEMO_APPROVAL_KMS_KEY_ID": os.getenv("DEMO_APPROVAL_KMS_KEY_ID"),
+        "DEMO_COORDINATOR_KMS_KEY_ID": os.getenv("DEMO_COORDINATOR_KMS_KEY_ID"),
+        "DEMO_ARCHITECTURE_KMS_KEY_ID": os.getenv("DEMO_ARCHITECTURE_KMS_KEY_ID"),
+        "DEMO_SECURITY_KMS_KEY_ID": os.getenv("DEMO_SECURITY_KMS_KEY_ID"),
+        "DEMO_PERFORMANCE_KMS_KEY_ID": os.getenv("DEMO_PERFORMANCE_KMS_KEY_ID"),
+        "DEMO_COMPLIANCE_KMS_KEY_ID": os.getenv("DEMO_COMPLIANCE_KMS_KEY_ID"),
     }
     missing = [name for name, value in required.items() if not value and name != "DEMO_VAULT_TOKEN"]
     if missing == ["DEMO_VAULT_TOKEN_FILE"] and os.getenv("DEMO_ALLOW_INSECURE_VAULT_TOKEN") == "1" and required["DEMO_VAULT_TOKEN"]:
@@ -64,32 +76,32 @@ def build_settings(temp_runtime_dir: Path) -> DemoSettings:
         vault_ca_cert=os.getenv("DEMO_VAULT_CA_CERT") or None,
         vault_skip_verify=os.getenv("DEMO_VAULT_SKIP_VERIFY", "0") == "1",
         agent_kms_keys={
-            "intake-agent": required["DEMO_INTAKE_KMS_KEY_ID"],
-            "triage-agent": required["DEMO_TRIAGE_KMS_KEY_ID"],
-            "resolver-agent": required["DEMO_RESOLVER_KMS_KEY_ID"],
-            "approval-agent": required["DEMO_APPROVAL_KMS_KEY_ID"],
+            "coordinator-agent": required["DEMO_COORDINATOR_KMS_KEY_ID"],
+            "architecture-agent": required["DEMO_ARCHITECTURE_KMS_KEY_ID"],
+            "security-agent": required["DEMO_SECURITY_KMS_KEY_ID"],
+            "performance-agent": required["DEMO_PERFORMANCE_KMS_KEY_ID"],
+            "compliance-agent": required["DEMO_COMPLIANCE_KMS_KEY_ID"],
         },
         console_port=8010,
         host="127.0.0.1",
         organization=base.organization,
         agents=base.agents,
+        llm=base.llm,
     )
 
 
 @pytest.mark.anyio
-async def test_normal_flow_and_attack_scenarios(temp_runtime_dir: Path) -> None:
+async def test_code_review_flow_and_attacks(temp_runtime_dir: Path) -> None:
     settings = build_settings(temp_runtime_dir)
     os.environ["AGENT_REGISTRY_PATH"] = str(settings.registry_path)
     os.environ["AGENT_REGISTRY_DB_PATH"] = str(temp_runtime_dir / "registry.sqlite3")
     store = RegistryStore(os.environ["AGENT_REGISTRY_DB_PATH"])
     store.create_developer(
-        developer_id="dev-1",
-        client_id="developer-a",
+        developer_id="dev-1", client_id="developer-a",
         api_key_hash=hash_api_key("secret-api-key"),
     )
     store.create_developer(
-        developer_id="dev-2",
-        client_id="rogue-client",
+        developer_id="dev-2", client_id="rogue-client",
         api_key_hash=hash_api_key("rogue-api-key"),
     )
     registry_app = create_registry_app()
@@ -105,64 +117,80 @@ async def test_normal_flow_and_attack_scenarios(temp_runtime_dir: Path) -> None:
     apps["console.local"] = console_app
 
     async with httpx.AsyncClient(transport=transport, base_url="http://console.local") as client:
-        create_response = await client.post(
-            "/api/tickets",
-            json={"title": "Urgent password reset", "description": "urgent password reset for executive login access"},
+        # -- Submit code review -------------------------------------------------
+        submit_response = await client.post(
+            "/api/reviews",
+            json={
+                "title": "SQL Injection in login handler",
+                "code": "def login(username, password):\n    query = 'SELECT * FROM users WHERE name = \\'' + username + '\\''\n    db.execute(query)\n    return True",
+                "language_hint": "python",
+            },
+            timeout=300,
         )
-        assert create_response.status_code == 200
-        ticket_id = create_response.json()["ticket_id"]
+        assert submit_response.status_code == 200
+        data = submit_response.json()
+        assert data.get("ok") is True
+        review_id = data["review_id"]
 
-        detail = await client.get(f"/api/tickets/{ticket_id}?events_page=1&events_page_size=20")
+        # -- Check review detail -------------------------------------------------
+        detail = await client.get(f"/api/reviews/{review_id}")
         assert detail.status_code == 200
         payload = detail.json()
-        assert payload["ticket"]["status"] == "resolved"
-        event_types = [event["event_type"] for event in payload["events"]]
-        assert "approval_granted" in event_types
-        assert "ticket_resolved" in event_types
+        assert payload["review"]["status"] == "completed"
+        assert payload["review"]["overall_score"] is not None
+        findings = payload["findings"]
+        assert len(findings) >= 1  # SQL injection should be caught
+        event_types = [e["event_type"] for e in payload["events"]]
+        assert "review_completed" in event_types
 
-        tickets = await client.get("/api/tickets?page=1&page_size=5")
-        assert tickets.status_code == 200
-        assert tickets.json()["total"] >= 1
+        # -- List reviews --------------------------------------------------------
+        reviews = await client.get("/api/reviews?page=1&page_size=5")
+        assert reviews.status_code == 200
+        assert reviews.json()["total"] >= 1
 
-        auth_events = await client.get("/api/auth-events?page=1&page_size=5")
-        assert auth_events.status_code == 200
+        # -- Auth events ---------------------------------------------------------
+        auth = await client.get("/api/auth-events?page=1&page_size=10")
+        assert auth.status_code == 200
+        verified = [e for e in auth.json()["items"] if e["result"] == "verified"]
+        assert len(verified) >= 4  # at least 4 specialist agents verified
 
+        # -- Registry view -------------------------------------------------------
         registry = await client.get("/api/registry?page=1&page_size=10")
         assert registry.status_code == 200
-        assert len(registry.json()["agents"]) == 4
+        assert len(registry.json()["agents"]) == 5
 
-        unregistered = await client.post("/api/scenarios/unregistered")
-        assert unregistered.status_code == 200
-        assert unregistered.json()["status_code"] == 401
+        # -- Attack 1: Unregistered agent ----------------------------------------
+        r = await client.post("/api/scenarios/unregistered")
+        assert r.status_code == 200
+        assert r.json()["status_code"] == 401
 
-        tampered = await client.post("/api/scenarios/tampered")
-        assert tampered.status_code == 200
-        assert tampered.json()["status_code"] == 401
+        # -- Attack 2: Tampered result -------------------------------------------
+        r = await client.post("/api/scenarios/tampered")
+        assert r.status_code == 200
+        assert r.json()["status_code"] == 401
 
-        replay = await client.post("/api/scenarios/replay")
-        assert replay.status_code == 200
-        assert replay.json()["first"]["status_code"] == 200
-        assert replay.json()["second"]["status_code"] == 401
+        # -- Attack 3: Nonce replay ----------------------------------------------
+        r = await client.post("/api/scenarios/replay")
+        assert r.status_code == 200
+        assert r.json()["first"]["status_code"] == 200
+        assert r.json()["second"]["status_code"] == 401
 
-        stolen = await client.post("/api/scenarios/stolen-api-key")
-        assert stolen.status_code == 200
-        assert stolen.json()["status_code"] in {401, 409}
+        # -- Attack 4: Stolen API Key --------------------------------------------
+        r = await client.post("/api/scenarios/stolen-api-key")
+        assert r.status_code == 200
+        assert r.json()["status_code"] in {401, 403, 409}
 
-        owner_conflict = await client.post("/api/scenarios/owner-conflict")
-        assert owner_conflict.status_code == 200
-        assert owner_conflict.json()["status_code"] == 403
+        # -- Attack 5: Capability escalation -------------------------------------
+        r = await client.post("/api/scenarios/capability-escalation")
+        assert r.status_code == 200
+        # Coordinator should reject because architecture agent lacks security capability
+        assert r.json()["status_code"] in {401, 403}
 
-        detail_after_attacks = await client.get(f"/api/tickets/{ticket_id}?events_page=1&events_page_size=20")
-        assert detail_after_attacks.status_code == 200
-        attack_event_types = [event["event_type"] for event in detail_after_attacks.json()["events"]]
-        assert "stolen_api_key_publish" in attack_event_types
-        assert "owner_conflict_publish" in attack_event_types
-
-        auth_events_after_attacks = await client.get("/api/auth-events?page=1&page_size=20")
-        assert auth_events_after_attacks.status_code == 200
-        registry_rejections = [
-            event
-            for event in auth_events_after_attacks.json()["items"]
-            if event["target_agent"] == "registry" and event["result"] == "rejected"
+        # -- Check attack auth events were recorded ------------------------------
+        auth_after = await client.get("/api/auth-events?page=1&page_size=30")
+        assert auth_after.status_code == 200
+        attack_events = [
+            e for e in auth_after.json()["items"]
+            if e["target_agent"] == "attack-scenario"
         ]
-        assert len(registry_rejections) >= 2
+        assert len(attack_events) >= 5

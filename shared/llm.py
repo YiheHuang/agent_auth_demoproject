@@ -1,65 +1,65 @@
-"""LLM service module -- OpenAI SDK wrapper for agent decision-making.
+"""LLM service module — OpenAI SDK wrapper for code review decisions.
 
-Provides typed async functions for each agent role's decision point.
-All functions share a common pattern: create an AsyncOpenAI client,
-send a system + user prompt, and parse the JSON response into a
-typed dataclass.
+Provides typed async functions for each agent role:
+  - analyze_code_submission      (Coordinator, step 1)
+  - review_architecture          (Architecture Agent)
+  - review_security              (Security Agent)
+  - review_performance           (Performance Agent)
+  - review_compliance            (Compliance Agent)
+  - synthesize_report            (Coordinator, final step)
 
-On any failure (network, parse error, empty response), an exception is
-raised so callers can fall back to static rules.
+All functions share a common pattern: create AsyncOpenAI client, send
+system + user prompts, parse JSON response into typed dataclasses.
+
+On failure, every function raises an exception so callers can fall back
+to shared/rules.py.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from openai import AsyncOpenAI
 
-from .prompts import (
-    approval_prompt,
-    intake_prompt,
-    resolver_prompt,
-    triage_prompt,
-)
+from . import prompts
 from .settings import LLMSettings
 
 
 # -- Typed result dataclasses ------------------------------------------------
 
 @dataclass(slots=True)
-class IntakeResult:
-    category: str       # "security" | "finance" | "general"
-    priority: str       # "high" | "medium" | "low"
-    risk_level: str     # "high" | "normal"
-    reasoning: str      # 1-2 sentence explanation in Chinese
+class AnalysisResult:
+    language: str
+    code_type: str
+    complexity: str
+    review_focus: list[str] = field(default_factory=list)
+    summary: str = ""
 
 
 @dataclass(slots=True)
-class TriageResult:
-    route_to: str       # "approval-agent" | "resolver-agent"
-    reason: str         # 1-2 sentence explanation in Chinese
+class ReviewResult:
+    score: int
+    summary: str
+    findings: list[dict] = field(default_factory=list)
 
 
 @dataclass(slots=True)
-class ApprovalResult:
-    approved: bool
-    conditions: str     # extra notes for the resolver (or "")
-    reason: str         # 1-2 sentence explanation in Chinese
-
-
-@dataclass(slots=True)
-class ResolverResult:
-    status: str         # "resolved" | "waiting_user"
-    resolution: str     # detailed resolution text in Chinese
-    reason: str         # 1 sentence explanation in Chinese
+class SynthesisResult:
+    overall_score: int
+    summary: str
+    architecture_score: int
+    security_score: int
+    performance_score: int
+    compliance_score: int
+    risk_items: list[dict] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
 
 
 # -- Internal helpers --------------------------------------------------------
 
 def _create_client(settings: LLMSettings) -> AsyncOpenAI:
-    """Create an AsyncOpenAI client configured from LLMSettings."""
     return AsyncOpenAI(
         base_url=settings.base_url,
         api_key=settings.api_key,
@@ -73,11 +73,6 @@ async def _call_llm(
     system: str,
     user: str,
 ) -> dict[str, Any]:
-    """Send a system + user prompt and return the parsed JSON response.
-
-    Raises RuntimeError if the LLM returns empty content or the JSON is
-    unparseable.
-    """
     response = await client.chat.completions.create(
         model=settings.model,
         temperature=settings.temperature,
@@ -94,79 +89,113 @@ async def _call_llm(
     return json.loads(content)
 
 
-# -- Public async decision functions -----------------------------------------
+# -- Public async functions --------------------------------------------------
 
-async def classify_ticket(
+async def analyze_code_submission(
     settings: LLMSettings,
-    title: str,
-    description: str,
-) -> IntakeResult:
-    """Classify a new ticket: category, priority, risk_level."""
+    code: str,
+    language_hint: str | None = None,
+) -> AnalysisResult:
     client = _create_client(settings)
-    system, user = intake_prompt(title, description)
+    system, user = prompts.coordinator_analysis_prompt(code, language_hint)
     data = await _call_llm(client, settings, system, user)
-    return IntakeResult(
-        category=data.get("category", "general"),
-        priority=data.get("priority", "medium"),
-        risk_level=data.get("risk_level", "normal"),
-        reasoning=data.get("reasoning", ""),
+    return AnalysisResult(
+        language=data.get("language", "unknown"),
+        code_type=data.get("code_type", "unknown"),
+        complexity=data.get("complexity", "medium"),
+        review_focus=data.get("review_focus", ["architecture", "security", "performance", "compliance"]),
+        summary=data.get("summary", ""),
     )
 
 
-async def triage_ticket(
+async def review_architecture(
     settings: LLMSettings,
-    title: str,
-    description: str,
-    category: str,
-    priority: str,
-    risk_level: str,
-) -> TriageResult:
-    """Decide where to route a classified ticket."""
+    code: str,
+    language: str,
+    context: str | None = None,
+) -> ReviewResult:
     client = _create_client(settings)
-    system, user = triage_prompt(title, description, category, priority, risk_level)
+    system, user = prompts.architecture_review_prompt(code, language, context)
     data = await _call_llm(client, settings, system, user)
-    return TriageResult(
-        route_to=data.get("route_to", "resolver-agent"),
-        reason=data.get("reason", ""),
+    return ReviewResult(
+        score=data.get("score", 7),
+        summary=data.get("summary", ""),
+        findings=data.get("findings", []),
     )
 
 
-async def approve_ticket(
+async def review_security(
     settings: LLMSettings,
-    title: str,
-    description: str,
-    category: str,
-    priority: str,
-    risk_level: str,
-    notes: list[str] | None = None,
-) -> ApprovalResult:
-    """Approve or reject a high-risk ticket before resolution."""
+    code: str,
+    language: str,
+    context: str | None = None,
+) -> ReviewResult:
     client = _create_client(settings)
-    system, user = approval_prompt(
-        title, description, category, priority, risk_level, notes
-    )
+    system, user = prompts.security_review_prompt(code, language, context)
     data = await _call_llm(client, settings, system, user)
-    return ApprovalResult(
-        approved=data.get("approved", True),
-        conditions=data.get("conditions", ""),
-        reason=data.get("reason", ""),
+    return ReviewResult(
+        score=data.get("score", 7),
+        summary=data.get("summary", ""),
+        findings=data.get("findings", []),
     )
 
 
-async def resolve_ticket(
+async def review_performance(
     settings: LLMSettings,
-    title: str,
-    description: str,
-    category: str,
-    priority: str,
-    notes: list[str] | None = None,
-) -> ResolverResult:
-    """Generate a resolution for a ticket."""
+    code: str,
+    language: str,
+    context: str | None = None,
+) -> ReviewResult:
     client = _create_client(settings)
-    system, user = resolver_prompt(title, description, category, priority, notes)
+    system, user = prompts.performance_review_prompt(code, language, context)
     data = await _call_llm(client, settings, system, user)
-    return ResolverResult(
-        status=data.get("status", "resolved"),
-        resolution=data.get("resolution", ""),
-        reason=data.get("reason", ""),
+    return ReviewResult(
+        score=data.get("score", 7),
+        summary=data.get("summary", ""),
+        findings=data.get("findings", []),
+    )
+
+
+async def review_compliance(
+    settings: LLMSettings,
+    code: str,
+    language: str,
+    context: str | None = None,
+) -> ReviewResult:
+    client = _create_client(settings)
+    system, user = prompts.compliance_review_prompt(code, language, context)
+    data = await _call_llm(client, settings, system, user)
+    return ReviewResult(
+        score=data.get("score", 7),
+        summary=data.get("summary", ""),
+        findings=data.get("findings", []),
+    )
+
+
+async def synthesize_report(
+    settings: LLMSettings,
+    code: str,
+    language: str,
+    coordinator_analysis: str,
+    architecture_result: dict,
+    security_result: dict,
+    performance_result: dict,
+    compliance_result: dict,
+) -> SynthesisResult:
+    client = _create_client(settings)
+    system, user = prompts.coordinator_synthesis_prompt(
+        code, language, coordinator_analysis,
+        architecture_result, security_result,
+        performance_result, compliance_result,
+    )
+    data = await _call_llm(client, settings, system, user)
+    return SynthesisResult(
+        overall_score=data.get("overall_score", 7),
+        summary=data.get("summary", ""),
+        architecture_score=data.get("architecture_score", 7),
+        security_score=data.get("security_score", 7),
+        performance_score=data.get("performance_score", 7),
+        compliance_score=data.get("compliance_score", 7),
+        risk_items=data.get("risk_items", []),
+        recommendations=data.get("recommendations", []),
     )

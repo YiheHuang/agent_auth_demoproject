@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agent-auth-demo-project"
 version = "0.1.0"
-description = "Multi-agent ticket workflow demo powered by agent_auth_sdk"
+description = "Multi-Agent Code Review & Security Audit — powered by agent_auth_sdk and OpenAI-compatible LLMs"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

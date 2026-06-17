@@ -1,0 +1,61 @@
+测试代码 1：包含 SQL 注入 + 硬编码密钥 + 糟糕架构
+
+  标题：Review: user_auth.py
+
+  import sqlite3
+
+  PASSWORD = "admin123"
+  API_KEY = "sk-abc123xyz456"
+
+  def login(username, password):
+      conn = sqlite3.connect("users.db")
+      query = "SELECT * FROM users WHERE name = '" + username + "' AND pass = '" + password + "'"
+      result = conn.execute(query).fetchone()
+      if result:
+          print("Login success for " + username)
+          return True
+      return False
+
+  def get_user(id):
+      conn = sqlite3.connect("users.db")
+      for row in conn.execute("SELECT * FROM users"):
+          if row[0] == id:
+              return row
+      return None
+
+  def reset_password(username, new_pass):
+      conn = sqlite3.connect("users.db")
+      conn.execute("UPDATE users SET pass = '" + new_pass + "' WHERE name = '" + username + "'")
+      conn.commit()
+      print("Password reset for " + username)
+
+  这份代码包含至少 8 个问题：
+  - SQL 注入 × 3（三处字符串拼接 SQL）
+  - 硬编码密码和 API Key
+  - 无密码哈希
+  - 重复的数据库连接代码
+  - N+1 查询（get_user 遍历全表）
+  - 函数缺少 docstring
+
+  测试代码 2：性能问题 + 嵌套循环
+
+  标题：Review: data_processor.py
+
+  def process_orders(orders, db):
+      results = []
+      for order in orders:
+          customer = db.execute("SELECT * FROM customers WHERE id = " + str(order.customer_id)).fetchone()
+          items = db.execute("SELECT * FROM items WHERE order_id = " + str(order.id)).fetchall()
+          for item in items:
+              for discount in get_active_discounts():
+                  item.price = item.price * (1 - discount.rate)
+              results.append(item)
+          time.sleep(0.1)
+      return results
+
+  def get_active_discounts():
+      discounts = []
+      for i in range(1000):
+          if i % 7 == 0:
+              discounts.append({"rate": 0.05})
+      return discounts

@@ -1,37 +1,30 @@
-"""Tests for the LLM service module (shared/llm.py).
-
-All tests mock _call_llm to avoid real API calls.  They verify:
-- Correct prompt construction
-- Correct return types and field mapping
-- Graceful handling of missing / invalid JSON fields (defaults)
-- Exception propagation on LLM failure
-"""
+"""Tests for LLM code review functions."""
 
 from __future__ import annotations
 
 import pytest
 
 from shared.llm import (
-    IntakeResult,
-    TriageResult,
-    ApprovalResult,
-    ResolverResult,
-    classify_ticket,
-    triage_ticket,
-    approve_ticket,
-    resolve_ticket,
-    _call_llm,
+    AnalysisResult,
+    ReviewResult,
+    SynthesisResult,
+    analyze_code_submission,
+    review_architecture,
+    review_security,
+    review_performance,
+    review_compliance,
+    synthesize_report,
 )
 from shared.prompts import (
-    intake_prompt,
-    triage_prompt,
-    approval_prompt,
-    resolver_prompt,
+    coordinator_analysis_prompt,
+    architecture_review_prompt,
+    security_review_prompt,
+    performance_review_prompt,
+    compliance_review_prompt,
+    coordinator_synthesis_prompt,
 )
 from shared.settings import LLMSettings
 
-
-# -- Shared fixtures ---------------------------------------------------------
 
 @pytest.fixture
 def llm_settings() -> LLMSettings:
@@ -40,204 +33,169 @@ def llm_settings() -> LLMSettings:
         api_key="test-key",
         model="gpt-4o",
         temperature=0.0,
-        max_tokens=256,
+        max_tokens=512,
         timeout=10.0,
     )
 
 
 # -- Prompt tests ------------------------------------------------------------
 
-def test_intake_prompt_contains_ticket_info():
-    system, user = intake_prompt("Reset Password", "I cannot log in")
-    assert "Reset Password" in user
-    assert "I cannot log in" in user
-    assert "category" in system
-    assert "priority" in system
-    assert "risk_level" in system
-    assert "reasoning" in system
+def test_coordinator_analysis_prompt() -> None:
+    system, user = coordinator_analysis_prompt("def foo(): pass", "python")
+    assert "def foo(): pass" in user
+    assert "language" in system
+    assert "code_type" in system
+    assert "complexity" in system
 
 
-def test_triage_prompt_contains_classification():
-    system, user = triage_prompt(
-        "Test", "Desc", "security", "high", "high",
+def test_architecture_review_prompt() -> None:
+    system, user = architecture_review_prompt("code here", "python")
+    assert "code here" in user
+    assert "SOLID" in system
+    assert "design_pattern" in system
+
+
+def test_security_review_prompt() -> None:
+    system, user = security_review_prompt("code", "javascript")
+    assert "OWASP" in system
+    assert "injection" in system
+    assert "javascript" in user
+
+
+def test_performance_review_prompt() -> None:
+    system, user = performance_review_prompt("for loop code", "java")
+    assert "algorithm_complexity" in system
+    assert "n_plus_one_query" in system
+
+
+def test_compliance_review_prompt() -> None:
+    system, user = compliance_review_prompt("code", "python")
+    assert "code_style" in system
+    assert "documentation" in system
+
+
+def test_synthesis_prompt() -> None:
+    system, user = coordinator_synthesis_prompt(
+        "code", "python", "analysis",
+        {"score": 7, "summary": "ok", "findings": []},
+        {"score": 5, "summary": "issues", "findings": [{"severity": "critical", "title": "SQLi"}]},
+        {"score": 8, "summary": "fine", "findings": []},
+        {"score": 6, "summary": "ok", "findings": []},
     )
-    assert "category=security" in user
-    assert "priority=high" in user
-    assert "risk_level=high" in user
-    assert "approval-agent" in system
-    assert "resolver-agent" in system
+    assert "risk_items" in system
+    assert "overall_score" in system
 
 
-def test_approval_prompt_contains_notes():
-    system, user = approval_prompt(
-        "Test", "Desc", "security", "high", "high",
-        notes=["verify identity", "check audit log"],
-    )
-    assert "verify identity" in user
-    assert "check audit log" in user
-    assert "approved" in system
-
-
-def test_resolver_prompt_contains_ticket_info():
-    system, user = resolver_prompt(
-        "Test", "Description here", "general", "medium",
-    )
-    assert "Test" in user
-    assert "Description here" in user
-    assert "category=general" in user
-    assert "status" in system
-    assert "resolution" in system
-
-
-# -- LLM function tests (with mocked _call_llm) ------------------------------
+# -- LLM Function tests (mocked) ---------------------------------------------
 
 @pytest.mark.asyncio
-async def test_classify_ticket_security(monkeypatch, llm_settings):
-    """Mock LLM returns a security classification."""
+async def test_analyze_code_submission(monkeypatch, llm_settings) -> None:
     async def mock_call(client, settings, system, user):
-        return {
-            "category": "security",
-            "priority": "high",
-            "risk_level": "high",
-            "reasoning": "密码重置属于安全问题且用户标注紧急。",
-        }
+        return {"language": "python", "code_type": "module",
+                "complexity": "medium", "review_focus": ["architecture", "security"],
+                "summary": "A Python module with moderate complexity."}
 
     monkeypatch.setattr("shared.llm._call_llm", mock_call)
-    result = await classify_ticket(
-        llm_settings, "紧急密码重置", "无法登录需要立即重置密码",
-    )
-    assert isinstance(result, IntakeResult)
-    assert result.category == "security"
-    assert result.priority == "high"
-    assert result.risk_level == "high"
-    assert "密码" in result.reasoning
+    result = await analyze_code_submission(llm_settings, "def foo(): pass")
+    assert isinstance(result, AnalysisResult)
+    assert result.language == "python"
+    assert result.complexity == "medium"
+    assert "architecture" in result.review_focus
 
 
 @pytest.mark.asyncio
-async def test_classify_ticket_general(monkeypatch, llm_settings):
-    """Mock LLM returns a general / low-priority classification."""
+async def test_review_architecture(monkeypatch, llm_settings) -> None:
     async def mock_call(client, settings, system, user):
-        return {
-            "category": "general",
-            "priority": "low",
-            "risk_level": "normal",
-            "reasoning": "普通咨询工单。",
-        }
+        return {"score": 6, "summary": "Architecture needs improvement.",
+                "findings": [{"severity": "medium", "category": "solid_principle",
+                              "title": "SRP Violation", "description": "Class has multiple responsibilities.",
+                              "recommendation": "Split into smaller classes."}]}
 
     monkeypatch.setattr("shared.llm._call_llm", mock_call)
-    result = await classify_ticket(
-        llm_settings, "如何使用打印机", "请问如何连接网络打印机",
-    )
-    assert result.category == "general"
-    assert result.priority == "low"
-    assert result.risk_level == "normal"
+    result = await review_architecture(llm_settings, "code", "python")
+    assert isinstance(result, ReviewResult)
+    assert result.score == 6
+    assert len(result.findings) == 1
+    assert result.findings[0]["severity"] == "medium"
 
 
 @pytest.mark.asyncio
-async def test_triage_high_risk_routes_to_approval(monkeypatch, llm_settings):
-    """High-risk tickets should route to approval-agent."""
+async def test_review_security_finds_vulns(monkeypatch, llm_settings) -> None:
     async def mock_call(client, settings, system, user):
-        return {"route_to": "approval-agent", "reason": "高风险工单需要审批。"}
+        return {"score": 3, "summary": "Multiple critical vulnerabilities found.",
+                "findings": [
+                    {"severity": "critical", "category": "injection",
+                     "title": "SQL Injection", "description": "Unsanitized input in SQL query.",
+                     "recommendation": "Use parameterized queries."},
+                    {"severity": "high", "category": "sensitive_data",
+                     "title": "Hardcoded API Key", "description": "API key exposed in source.",
+                     "recommendation": "Move to environment variable."},
+                ]}
 
     monkeypatch.setattr("shared.llm._call_llm", mock_call)
-    result = await triage_ticket(
-        llm_settings, "数据泄露", "数据库被入侵",
-        "security", "high", "high",
-    )
-    assert isinstance(result, TriageResult)
-    assert result.route_to == "approval-agent"
+    result = await review_security(llm_settings, "code", "python")
+    assert result.score == 3
+    assert len(result.findings) == 2
 
 
 @pytest.mark.asyncio
-async def test_triage_low_risk_routes_to_resolver(monkeypatch, llm_settings):
-    """Low-risk tickets should route directly to resolver-agent."""
+async def test_review_performance(monkeypatch, llm_settings) -> None:
     async def mock_call(client, settings, system, user):
-        return {"route_to": "resolver-agent", "reason": "低风险直接处理。"}
+        return {"score": 5, "summary": "Performance issues detected.",
+                "findings": [{"severity": "high", "category": "n_plus_one_query",
+                              "title": "N+1 Query", "description": "DB query inside loop.",
+                              "recommendation": "Batch the queries."}]}
 
     monkeypatch.setattr("shared.llm._call_llm", mock_call)
-    result = await triage_ticket(
-        llm_settings, "更换墨盒", "打印机墨盒空了",
-        "general", "low", "normal",
-    )
-    assert result.route_to == "resolver-agent"
+    result = await review_performance(llm_settings, "code", "python")
+    assert result.score == 5
+    assert len(result.findings) == 1
 
 
 @pytest.mark.asyncio
-async def test_approval_approves(monkeypatch, llm_settings):
-    """Approval agent should approve valid tickets."""
+async def test_review_compliance(monkeypatch, llm_settings) -> None:
     async def mock_call(client, settings, system, user):
-        return {
-            "approved": True,
-            "conditions": "请先验证用户身份",
-            "reason": "工单内容清晰，但涉及安全需验证身份。",
-        }
+        return {"score": 4, "summary": "Multiple compliance issues.",
+                "findings": [{"severity": "medium", "category": "documentation",
+                              "title": "Missing Docstrings", "description": "None of the functions have docstrings.",
+                              "recommendation": "Add docstrings to all public functions."}]}
 
     monkeypatch.setattr("shared.llm._call_llm", mock_call)
-    result = await approve_ticket(
-        llm_settings, "密码重置", "忘记密码", "security", "high", "high",
-        notes=["urgent"],
-    )
-    assert isinstance(result, ApprovalResult)
-    assert result.approved is True
-    assert "验证" in result.conditions
+    result = await review_compliance(llm_settings, "code", "python")
+    assert result.score == 4
+    assert len(result.findings) == 1
 
 
 @pytest.mark.asyncio
-async def test_resolver_resolves(monkeypatch, llm_settings):
-    """Resolver agent should produce a detailed resolution."""
+async def test_synthesize_report(monkeypatch, llm_settings) -> None:
     async def mock_call(client, settings, system, user):
-        return {
-            "status": "resolved",
-            "resolution": "已为用户重置密码并验证新密码可用，同时检查了账户无异常登录。",
-            "reason": "密码重置完成。",
-        }
+        return {"overall_score": 5, "summary": "The code has security issues that must be fixed.",
+                "architecture_score": 7, "security_score": 3,
+                "performance_score": 6, "compliance_score": 5,
+                "risk_items": [{"rank": 1, "severity": "critical", "category": "injection",
+                                "title": "SQL Injection", "impact": "Data breach possible.",
+                                "mitigation": "Use parameterized queries."}],
+                "recommendations": ["Fix SQL injection immediately.", "Add input validation."]}
 
     monkeypatch.setattr("shared.llm._call_llm", mock_call)
-    result = await resolve_ticket(
-        llm_settings, "密码重置", "忘记密码", "security", "high",
+    result = await synthesize_report(
+        llm_settings, "code", "python", "analysis",
+        {"score": 7, "summary": "", "findings": []},
+        {"score": 3, "summary": "", "findings": []},
+        {"score": 6, "summary": "", "findings": []},
+        {"score": 5, "summary": "", "findings": []},
     )
-    assert isinstance(result, ResolverResult)
-    assert result.status == "resolved"
-    assert "密码" in result.resolution
+    assert isinstance(result, SynthesisResult)
+    assert result.overall_score == 5
+    assert len(result.risk_items) == 1
+    assert len(result.recommendations) == 2
 
 
 @pytest.mark.asyncio
-async def test_resolver_waiting_user(monkeypatch, llm_settings):
-    """Resolver should request more info when needed."""
-    async def mock_call(client, settings, system, user):
-        return {
-            "status": "waiting_user",
-            "resolution": "需要用户提供注册邮箱地址以完成身份验证。",
-            "reason": "缺少关键信息。",
-        }
-
-    monkeypatch.setattr("shared.llm._call_llm", mock_call)
-    result = await resolve_ticket(
-        llm_settings, "账户异常", "我的账户好像被盗了", "security", "high",
-    )
-    assert result.status == "waiting_user"
-
-
-@pytest.mark.asyncio
-async def test_empty_response_raises(monkeypatch, llm_settings):
-    """Empty LLM response should raise RuntimeError."""
-    async def mock_call(client, settings, system, user):
-        return {}  # missing all fields → defaults, but covered by defensive .get()
-
-    monkeypatch.setattr("shared.llm._call_llm", mock_call)
-    result = await classify_ticket(llm_settings, "T", "D")
-    # With empty dict, all defaults kick in — no exception
-    assert result.category == "general"
-    assert result.priority == "medium"
-    assert result.risk_level == "normal"
-
-
-@pytest.mark.asyncio
-async def test_exception_propagates(monkeypatch, llm_settings):
-    """If _call_llm raises, the public function should propagate it."""
+async def test_exception_propagates(monkeypatch, llm_settings) -> None:
     async def mock_call(client, settings, system, user):
         raise RuntimeError("API timeout")
 
     monkeypatch.setattr("shared.llm._call_llm", mock_call)
     with pytest.raises(RuntimeError, match="API timeout"):
-        await classify_ticket(llm_settings, "T", "D")
+        await analyze_code_submission(llm_settings, "code")

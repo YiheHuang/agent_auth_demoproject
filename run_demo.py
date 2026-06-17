@@ -79,11 +79,12 @@ def spawn_processes() -> list[subprocess.Popen[str]]:
         commands.append([sys.executable, "-m", "agent_auth_registry.run"])
     commands.extend(
         [
-            [sys.executable, "-m", "apps.agents.server", "intake-agent"],
-        [sys.executable, "-m", "apps.agents.server", "triage-agent"],
-        [sys.executable, "-m", "apps.agents.server", "resolver-agent"],
-        [sys.executable, "-m", "apps.agents.server", "approval-agent"],
-        [sys.executable, "-m", "apps.console.server"],
+            [sys.executable, "-m", "apps.agents.server", "coordinator-agent"],
+            [sys.executable, "-m", "apps.agents.server", "architecture-agent"],
+            [sys.executable, "-m", "apps.agents.server", "security-agent"],
+            [sys.executable, "-m", "apps.agents.server", "performance-agent"],
+            [sys.executable, "-m", "apps.agents.server", "compliance-agent"],
+            [sys.executable, "-m", "apps.console.server"],
         ]
     )
     processes: list[subprocess.Popen[str]] = []
@@ -136,10 +137,11 @@ def main() -> None:
         else:
             raise SystemExit("Demo requires DEMO_VAULT_TOKEN_FILE. For local-only dev, set DEMO_ALLOW_INSECURE_VAULT_TOKEN=1 with DEMO_VAULT_TOKEN.")
     for key_name in [
-        "DEMO_INTAKE_KMS_KEY_ID",
-        "DEMO_TRIAGE_KMS_KEY_ID",
-        "DEMO_RESOLVER_KMS_KEY_ID",
-        "DEMO_APPROVAL_KMS_KEY_ID",
+        "DEMO_COORDINATOR_KMS_KEY_ID",
+        "DEMO_ARCHITECTURE_KMS_KEY_ID",
+        "DEMO_SECURITY_KMS_KEY_ID",
+        "DEMO_PERFORMANCE_KMS_KEY_ID",
+        "DEMO_COMPLIANCE_KMS_KEY_ID",
     ]:
         if not env.get(key_name):
             raise SystemExit(f"Demo requires {key_name}.")

@@ -100,10 +100,11 @@ def get_demo_settings() -> DemoSettings:
     if registry_token is None and registry_publish_url == DEFAULT_REMOTE_REGISTRY_PUBLISH_URL:
         registry_token = DEFAULT_REMOTE_REGISTRY_TOKEN
     agents = {
-        "intake-agent": AgentSpec("intake-agent", 8101, "Intake Agent"),
-        "triage-agent": AgentSpec("triage-agent", 8102, "Triage Agent"),
-        "resolver-agent": AgentSpec("resolver-agent", 8103, "Resolver Agent"),
-        "approval-agent": AgentSpec("approval-agent", 8104, "Approval Agent"),
+        "coordinator-agent": AgentSpec("coordinator-agent", 8101, "Coordinator Agent"),
+        "architecture-agent": AgentSpec("architecture-agent", 8102, "Architecture Agent"),
+        "security-agent": AgentSpec("security-agent", 8103, "Security Agent"),
+        "performance-agent": AgentSpec("performance-agent", 8104, "Performance Agent"),
+        "compliance-agent": AgentSpec("compliance-agent", 8105, "Compliance Agent"),
     }
     return DemoSettings(
         root_dir=root,
@@ -124,14 +125,15 @@ def get_demo_settings() -> DemoSettings:
         vault_ca_cert=os.getenv("DEMO_VAULT_CA_CERT") or None,
         vault_skip_verify=os.getenv("DEMO_VAULT_SKIP_VERIFY", "0") == "1",
         agent_kms_keys={
-            "intake-agent": os.getenv("DEMO_INTAKE_KMS_KEY_ID"),
-            "triage-agent": os.getenv("DEMO_TRIAGE_KMS_KEY_ID"),
-            "resolver-agent": os.getenv("DEMO_RESOLVER_KMS_KEY_ID"),
-            "approval-agent": os.getenv("DEMO_APPROVAL_KMS_KEY_ID"),
+            "coordinator-agent": os.getenv("DEMO_COORDINATOR_KMS_KEY_ID"),
+            "architecture-agent": os.getenv("DEMO_ARCHITECTURE_KMS_KEY_ID"),
+            "security-agent": os.getenv("DEMO_SECURITY_KMS_KEY_ID"),
+            "performance-agent": os.getenv("DEMO_PERFORMANCE_KMS_KEY_ID"),
+            "compliance-agent": os.getenv("DEMO_COMPLIANCE_KMS_KEY_ID"),
         },
         console_port=8010,
         host=host,
-        organization="Agent Auth Demo",
+        organization="Code Review & Security Audit Demo",
         agents=agents,
         llm=LLMSettings(
             base_url=os.getenv("LLM_BASE_URL", "https://yunwu.ai/v1"),
