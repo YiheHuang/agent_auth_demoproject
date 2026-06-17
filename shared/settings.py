@@ -10,6 +10,16 @@ DEFAULT_REMOTE_REGISTRY_TOKEN = "123"
 
 
 @dataclass(frozen=True, slots=True)
+class LLMSettings:
+    base_url: str = "https://yunwu.ai/v1"
+    api_key: str = "sk-TP8v9yrsrv3WvhQldFsHShrWhNASAjF4ox1X8xMOguSzxZCN"
+    model: str = "gpt-4o"
+    temperature: float = 0.3
+    max_tokens: int = 1024
+    timeout: float = 30.0
+
+
+@dataclass(frozen=True, slots=True)
 class AgentSpec:
     role: str
     port: int
@@ -52,6 +62,7 @@ class DemoSettings:
     host: str
     organization: str
     agents: dict[str, AgentSpec]
+    llm: LLMSettings
 
     def agent_dir(self, role: str) -> Path:
         return self.runtime_dir / "agents" / role
@@ -122,4 +133,12 @@ def get_demo_settings() -> DemoSettings:
         host=host,
         organization="Agent Auth Demo",
         agents=agents,
+        llm=LLMSettings(
+            base_url=os.getenv("LLM_BASE_URL", "https://yunwu.ai/v1"),
+            api_key=os.getenv("LLM_API_KEY", "sk-TP8v9yrsrv3WvhQldFsHShrWhNASAjF4ox1X8xMOguSzxZCN"),
+            model=os.getenv("LLM_MODEL", "gpt-4o"),
+            temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
+            max_tokens=int(os.getenv("LLM_MAX_TOKENS", "1024")),
+            timeout=float(os.getenv("LLM_TIMEOUT", "30.0")),
+        ),
     )

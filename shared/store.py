@@ -217,6 +217,17 @@ class DemoStore:
             ).fetchall()
         return [AuthEvent.model_validate(dict(row)) for row in rows], total
 
+    def clear_all(self) -> dict[str, int]:
+        """Delete all tickets, ticket events, and auth events.  Returns counts."""
+        with self._connect() as conn:
+            tickets = conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0]
+            ticket_events = conn.execute("SELECT COUNT(*) FROM ticket_events").fetchone()[0]
+            auth_events = conn.execute("SELECT COUNT(*) FROM auth_events").fetchone()[0]
+            conn.execute("DELETE FROM tickets")
+            conn.execute("DELETE FROM ticket_events")
+            conn.execute("DELETE FROM auth_events")
+        return {"tickets": tickets, "ticket_events": ticket_events, "auth_events": auth_events}
+
 
 def _normalize_page_args(page: int, page_size: int) -> tuple[int, int]:
     return max(1, page), max(1, min(page_size, 50))

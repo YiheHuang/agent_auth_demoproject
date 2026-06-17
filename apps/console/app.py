@@ -143,33 +143,45 @@ def create_console_app(
             environment="attack",
             kid="rogue-unregistered",
         )
-        body = AgentTask(ticket_id=_latest_ticket_id(store), action="replay_probe").model_dump(mode="json")
+        body = AgentTask(ticket_id=_attack_ticket_id("unregistered"), action="replay_probe").model_dump(mode="json")
         target_url = settings.agents["triage-agent"].endpoint
         signed = await rogue.sign_http(method="POST", url=target_url, body=body)
         async with factory() as client:
             response = await client.post(target_url, json=body, headers=signed.headers)
+        _record_attack_auth(
+            store, scenario="unregistered", source_agent_id=rogue.agent_id,
+            status_code=response.status_code, payload=response.json(),
+        )
         return {"status_code": response.status_code, "payload": response.json()}
 
     @app.post("/api/scenarios/tampered")
     async def attack_tampered() -> dict:
         intake = _load_local_agent("intake-agent", settings)
         target_url = settings.agents["triage-agent"].endpoint
-        original = AgentTask(ticket_id=_latest_ticket_id(store), action="replay_probe", context="safe").model_dump(mode="json")
-        tampered = AgentTask(ticket_id=_latest_ticket_id(store), action="replay_probe", context="tampered").model_dump(mode="json")
+        original = AgentTask(ticket_id=_attack_ticket_id("tampered"), action="replay_probe", context="safe").model_dump(mode="json")
+        tampered = AgentTask(ticket_id=_attack_ticket_id("tampered"), action="replay_probe", context="tampered").model_dump(mode="json")
         signed = await intake.sign_http(method="POST", url=target_url, body=original)
         async with factory() as client:
             response = await client.post(target_url, json=tampered, headers=signed.headers)
+        _record_attack_auth(
+            store, scenario="tampered", source_agent_id=intake.agent_id,
+            status_code=response.status_code, payload=response.json(),
+        )
         return {"status_code": response.status_code, "payload": response.json()}
 
     @app.post("/api/scenarios/replay")
     async def attack_replay() -> dict:
         intake = _load_local_agent("intake-agent", settings)
-        body = AgentTask(ticket_id=_latest_ticket_id(store), action="replay_probe").model_dump(mode="json")
+        body = AgentTask(ticket_id=_attack_ticket_id("replay"), action="replay_probe").model_dump(mode="json")
         target_url = settings.agents["triage-agent"].endpoint
         signed = await intake.sign_http(method="POST", url=target_url, body=body, nonce="fixed-replay-nonce")
         async with factory() as client:
             first = await client.post(target_url, json=body, headers=signed.headers)
             second = await client.post(target_url, json=body, headers=signed.headers)
+        _record_attack_auth(
+            store, scenario="replay", source_agent_id=intake.agent_id,
+            status_code=second.status_code, payload=second.json(),
+        )
         return {"first": {"status_code": first.status_code, "payload": first.json()}, "second": {"status_code": second.status_code, "payload": second.json()}}
 
     @app.post("/api/scenarios/stolen-api-key")
@@ -211,12 +223,9 @@ def create_console_app(
         }
         async with factory() as client:
             response = await client.post(settings.registry_publish_url, json=payload, headers=headers)
-        _record_registry_attack(
-            store,
-            scenario="stolen_api_key_publish",
-            source_agent_id=rogue.agent_id,
-            status_code=response.status_code,
-            payload=response.json(),
+        _record_attack_auth(
+            store, scenario="stolen_api_key", source_agent_id=rogue.agent_id,
+            status_code=response.status_code, payload=response.json(),
         )
         return {"status_code": response.status_code, "payload": response.json()}
 
@@ -242,27 +251,26 @@ def create_console_app(
         }
         async with factory() as client:
             response = await client.post(settings.registry_publish_url, json=payload, headers=headers)
-        _record_registry_attack(
-            store,
-            scenario="owner_conflict_publish",
-            source_agent_id=legitimate.agent_id,
-            status_code=response.status_code,
-            payload=response.json(),
+        _record_attack_auth(
+            store, scenario="owner_conflict", source_agent_id=legitimate.agent_id,
+            status_code=response.status_code, payload=response.json(),
         )
         return {"status_code": response.status_code, "payload": response.json()}
+
+    @app.post("/api/clear-data")
+    async def clear_data() -> dict:
+        counts = store.clear_all()
+        return {"ok": True, "cleared": counts}
 
     return app
 
 
-def _latest_ticket_id(store: DemoStore) -> str:
-    tickets = store.list_tickets()
-    if not tickets:
-        ticket = store.create_ticket("Replay probe", "urgent password reset")
-        return ticket.ticket_id
-    return tickets[0].ticket_id
+def _attack_ticket_id(scenario: str) -> str:
+    """Generate a clearly labeled attack-probe ticket ID that won't collide with real tickets."""
+    return f"attack-probe-{scenario}"
 
 
-def _record_registry_attack(
+def _record_attack_auth(
     store: DemoStore,
     *,
     scenario: str,
@@ -270,28 +278,16 @@ def _record_registry_attack(
     status_code: int,
     payload: dict,
 ) -> None:
-    ticket_id = _latest_ticket_id(store)
+    """Record an attack scenario's auth event independently — never linked to a real ticket."""
     reason = str(payload.get("detail") or payload)
     result = "rejected" if status_code >= 400 else "verified"
     store.add_auth_event(
         AuthEvent(
             source_agent_id=source_agent_id,
-            target_agent="registry",
+            target_agent="attack-scenario",
             result=result,
             error_code=reason if status_code >= 400 else None,
-            detail=f"{scenario} returned HTTP {status_code}: {reason}",
-            created_at=utc_now(),
-        )
-    )
-    store.add_ticket_event(
-        TicketEvent(
-            ticket_id=ticket_id,
-            event_type=scenario,
-            from_agent=source_agent_id or "unknown",
-            to_agent="registry",
-            verification_result=reason if status_code >= 400 else "accepted",
-            reason=reason,
-            payload_summary=f"registry publish attempt returned HTTP {status_code}",
+            detail=f"[{scenario}] HTTP {status_code}: {reason}",
             created_at=utc_now(),
         )
     )
@@ -382,12 +378,14 @@ def _html() -> str:
       </section>
       <section class="panel">
         <h2>攻击演示面板</h2>
+        <div class="muted">攻击场景独立运行，不会污染工单数据。结果仅记录在认证事件中。</div>
         <button class="alt" onclick="runScenario('unregistered')">未注册 Agent 攻击</button>
         <button class="alt" onclick="runScenario('tampered')">签名篡改攻击</button>
         <button class="alt" onclick="runScenario('replay')">Nonce 重放攻击</button>
         <button class="alt" onclick="runScenario('stolen-api-key')">盗取 API Key 发布攻击</button>
         <button class="alt" onclick="runScenario('owner-conflict')">Owner 冲突发布攻击</button>
         <pre id="scenario-output">等待执行场景...</pre>
+        <button onclick="clearAllData()" style="background:#a12d2d;">清空全部数据（工单 + 事件 + 认证记录）</button>
       </section>
     </div>
     <div class="grid">
@@ -434,6 +432,18 @@ def _html() -> str:
       const res = await fetch(`/api/scenarios/${name}`, {method:'POST'});
       const data = await res.json();
       document.getElementById('scenario-output').textContent = JSON.stringify(data, null, 2);
+      await loadAll();
+    }
+
+    async function clearAllData() {
+      if (!confirm('确定要清空全部数据吗？这将删除所有工单、事件和认证记录。')) return;
+      const res = await fetch('/api/clear-data', {method:'POST'});
+      const data = await res.json();
+      document.getElementById('scenario-output').textContent = '数据已清空: ' + JSON.stringify(data.cleared, null, 2);
+      selectedTicketId = null;
+      ticketsPage = 1;
+      timelinePage = 1;
+      authPage = 1;
       await loadAll();
     }
 

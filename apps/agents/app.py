@@ -19,7 +19,12 @@ from fastapi.responses import JSONResponse
 from agent_auth_sdk import AgentInstance, FileMetadataCache, InMemoryNonceStore, MetadataResolverConfig, VerificationConfig, verify_http_request
 from agent_auth_sdk.config import TEST_PROFILE
 from shared.models import AgentTask, AgentTaskResult, AuthEvent, IntakeRequest, TicketEvent
-from shared.rules import classify_category, classify_priority, requires_approval, resolution_for, risk_level
+from shared.llm import (
+    approve_ticket,
+    classify_ticket,
+    resolve_ticket,
+    triage_ticket,
+)
 from shared.settings import AgentSpec, DemoSettings, get_demo_settings
 from shared.store import DemoStore, utc_now
 
@@ -142,9 +147,24 @@ def create_agent_app(
         ticket = store.get_ticket(request.ticket_id)
         if ticket is None:
             raise HTTPException(status_code=404, detail="ticket not found")
-        combined = f"{ticket.title}\n{ticket.description}"
-        category = classify_category(combined)
-        priority = classify_priority(combined)
+        # LLM-driven classification with fallback to static rules
+        try:
+            intake_result = await classify_ticket(
+                settings=runtime.settings.llm,
+                title=ticket.title,
+                description=ticket.description,
+            )
+            category = intake_result.category
+            priority = intake_result.priority
+            risk = intake_result.risk_level
+            llm_reasoning = intake_result.reasoning
+        except Exception:
+            from shared.rules import classify_category, classify_priority, risk_level as _risk_level
+            combined = f"{ticket.title}\n{ticket.description}"
+            category = classify_category(combined)
+            priority = classify_priority(combined)
+            risk = _risk_level(category, priority)
+            llm_reasoning = "(fallback to static rules)"
         ticket = store.update_ticket(
             ticket.ticket_id,
             category=category,
@@ -159,8 +179,8 @@ def create_agent_app(
                 from_agent="user",
                 to_agent=role,
                 verification_result="n/a",
-                reason=None,
-                payload_summary=f"category={category}, priority={priority}",
+                reason=llm_reasoning,
+                payload_summary=f"category={category}, priority={priority}, risk={risk}",
                 created_at=utc_now(),
             )
         )
@@ -169,7 +189,7 @@ def create_agent_app(
             action="triage_ticket",
             category=category,
             priority=priority,
-            risk_level=risk_level(category, priority),
+            risk_level=risk,
             context=ticket.description,
         )
         store.add_ticket_event(
@@ -282,7 +302,22 @@ async def _process_verified_task(runtime: DemoAgentRuntime, task: AgentTask, sou
             current_agent=role,
             status="triaged",
         )
-        target_role = "approval-agent" if requires_approval(ticket) else "resolver-agent"
+        # LLM-driven routing with fallback to static rules
+        try:
+            triage_result = await triage_ticket(
+                settings=runtime.settings.llm,
+                title=ticket.title,
+                description=ticket.description,
+                category=ticket.category,
+                priority=ticket.priority,
+                risk_level=task.risk_level or "normal",
+            )
+            target_role = triage_result.route_to
+            triage_reason = triage_result.reason
+        except Exception:
+            from shared.rules import requires_approval
+            target_role = "approval-agent" if requires_approval(ticket) else "resolver-agent"
+            triage_reason = "(fallback to static rules)"
         runtime.store.add_ticket_event(
             TicketEvent(
                 ticket_id=ticket.ticket_id,
@@ -290,7 +325,7 @@ async def _process_verified_task(runtime: DemoAgentRuntime, task: AgentTask, sou
                 from_agent=role,
                 to_agent=target_role,
                 verification_result="verified",
-                reason=None,
+                reason=triage_reason,
                 payload_summary=f"route_to={target_role}",
                 created_at=utc_now(),
             )
@@ -300,7 +335,7 @@ async def _process_verified_task(runtime: DemoAgentRuntime, task: AgentTask, sou
             action="approve_ticket" if target_role == "approval-agent" else "resolve_ticket",
             category=ticket.category,
             priority=ticket.priority,
-            risk_level=risk_level(ticket.category, ticket.priority),
+            risk_level=task.risk_level or "normal",
             context=ticket.description,
         )
         await runtime.send_task(target_role, next_task)
@@ -312,6 +347,26 @@ async def _process_verified_task(runtime: DemoAgentRuntime, task: AgentTask, sou
             current_agent=role,
             status="pending_approval",
         )
+        # LLM-driven approval with fallback (default approve)
+        try:
+            approval_result = await approve_ticket(
+                settings=runtime.settings.llm,
+                title=ticket.title,
+                description=ticket.description,
+                category=ticket.category,
+                priority=ticket.priority,
+                risk_level=task.risk_level or "normal",
+                notes=task.notes,
+            )
+            notes = ["approved"]
+            if approval_result.conditions:
+                notes.append(approval_result.conditions)
+            approval_reason = approval_result.reason
+            approval_summary = f"approved, conditions={approval_result.conditions}" if approval_result.conditions else "approved"
+        except Exception:
+            notes = ["approved"]
+            approval_reason = "(fallback to static rules)"
+            approval_summary = "approval granted for high-risk ticket"
         runtime.store.add_ticket_event(
             TicketEvent(
                 ticket_id=ticket.ticket_id,
@@ -319,8 +374,8 @@ async def _process_verified_task(runtime: DemoAgentRuntime, task: AgentTask, sou
                 from_agent=role,
                 to_agent="resolver-agent",
                 verification_result="verified",
-                reason=None,
-                payload_summary="approval granted for high-risk ticket",
+                reason=approval_reason,
+                payload_summary=approval_summary,
                 created_at=utc_now(),
             )
         )
@@ -329,15 +384,31 @@ async def _process_verified_task(runtime: DemoAgentRuntime, task: AgentTask, sou
             action="resolve_ticket",
             category=ticket.category,
             priority=ticket.priority,
-            risk_level=risk_level(ticket.category, ticket.priority),
+            risk_level=task.risk_level or "normal",
             context=ticket.description,
-            notes=["approved"],
+            notes=notes,
         )
         await runtime.send_task("resolver-agent", next_task)
         return AgentTaskResult(handled_by=role, next_agent="resolver-agent", status="approved")
 
     if role == "resolver-agent":
-        status, resolution = resolution_for(ticket)
+        # LLM-driven resolution with fallback to static rules
+        try:
+            resolver_result = await resolve_ticket(
+                settings=runtime.settings.llm,
+                title=ticket.title,
+                description=ticket.description,
+                category=ticket.category,
+                priority=ticket.priority,
+                notes=task.notes,
+            )
+            status = resolver_result.status
+            resolution = resolver_result.resolution
+            resolve_reason = resolver_result.reason
+        except Exception:
+            from shared.rules import resolution_for
+            status, resolution = resolution_for(ticket)
+            resolve_reason = "(fallback to static rules)"
         runtime.store.update_ticket(
             ticket.ticket_id,
             current_agent=role,
@@ -351,7 +422,7 @@ async def _process_verified_task(runtime: DemoAgentRuntime, task: AgentTask, sou
                 from_agent=role,
                 to_agent="user",
                 verification_result="verified",
-                reason=None,
+                reason=resolve_reason,
                 payload_summary=resolution,
                 created_at=utc_now(),
             )
