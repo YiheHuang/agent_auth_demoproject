@@ -1,0 +1,102 @@
+@startuml
+title agent-auth-sdk × OpenAI SDK：多 Agent 代码审查协作
+
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+<style>
+  participant { Padding 28 }
+  box { Padding 10 }
+</style>
+
+autonumber
+
+actor "用户" as User
+participant "Console\n(Web UI)" as Console
+participant "Coordinator\n(8101)" as Coord
+participant "Vault" as Vault
+participant "Registry" as Registry
+participant "Specialist\n(8102-8105)" as Spec
+participant "LLM API\n(OpenAI-compat)" as LLM
+
+== 启动：Agent 身份注册 ==
+
+Coord -> Vault : from_vault(domain, name, auto_create_key=True)
+Vault --> Coord : public_key
+Coord -> Coord : 构建 AgentInstance\n(agent-auth-sdk)
+Coord -> Vault : 签名 publish 请求
+Vault --> Coord : signature
+Coord -> Registry : publish(client_id, api_key)
+Registry --> Coord : owner 绑定成功
+
+Spec -> Vault : from_vault(…)
+Vault --> Spec : public_key
+Spec -> Vault : 签名 publish 请求
+Vault --> Spec : signature
+Spec -> Registry : publish(client_id, api_key)
+Registry --> Spec : owner 绑定成功
+
+note over Coord, Registry
+5 个 Agent 各自从 Vault 创建身份并发布到 Registry。
+每次重启时 SDK 自动完成上述流程。
+end note
+
+== 用户提交代码审查 ==
+
+User -> Console : 粘贴代码 + 提交
+Console -> Coord : POST /reviews/submit\n{title, code}
+
+== Coordinator：LLM 预分析 ==
+
+Coord -> LLM : analyze_code_submission(code)\n(AsyncOpenAI)
+LLM --> Coord : language / complexity / summary
+
+note over Coord, LLM
+OpenAI SDK 调用：通过 OpenAI 兼容 API 进行代码初步分析。
+失败时回退到 shared/rules.py 本地规则引擎。
+end note
+
+== Coordinator：签名并分发任务 ==
+
+Coord -> Vault : sign_http(method, url, body)
+Vault --> Coord : x-agent-* headers
+Coord -> Spec : POST /tasks/handle\n+ x-agent-* 签名 headers\n(action: review_architecture / security / …)
+
+== Specialist：验签 + 领域分析 + 签名返回 ==
+
+Spec -> Registry : resolve_agent(agent_id)
+Registry --> Spec : AgentMetadata + public_key
+Spec -> Spec : verify_http_request()\n校验 timestamp / nonce / signature
+Spec -> Spec : 能力校验（capability check）
+
+alt 验签通过
+    Spec -> LLM : review_security(code, context)\n(AsyncOpenAI)
+    LLM --> Spec : findings + score + summary
+    Spec -> Vault : sign_message(result)\nrecipient=coordinator
+    Vault --> Spec : SignedAgentMessage
+    Spec --> Coord : SignedAgentMessage{payload, signature}
+else 验签失败
+    Spec --> Coord : 401 拒绝
+end
+
+note over Spec, LLM
+每个 Specialist 调用 OpenAI SDK 进行各自领域的分析，
+返回前用 sign_message() 签名结果，防止响应篡改。
+LLM 调用失败时回退到规则引擎。
+end note
+
+Coord -> Coord : 汇总验签后的结果
+Coord -> LLM : synthesize_report(all_results)\n(AsyncOpenAI)
+LLM --> Coord : overall_score + risk_items + recommendations
+Coord --> Console : review_id + report
+Console --> User : 展示审查结果
+
+note over User, LLM
+完整双向签名：Coordinator → Specialist（sign_http + verify_http_request）
+Specialist → Coordinator（sign_message + verify_agent_message）。
+agent-auth-sdk 负责身份认证与请求完整性，
+OpenAI SDK 负责代码智能分析。
+end note
+
+@enduml

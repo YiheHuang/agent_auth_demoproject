@@ -34,6 +34,7 @@ from agent_auth_sdk import (
     InMemoryNonceStore,
     MetadataResolverConfig,
     VerificationConfig,
+    verify_agent_message,
     verify_http_request,
 )
 from agent_auth_sdk.config import TEST_PROFILE
@@ -262,19 +263,60 @@ def create_agent_app(
                 for action, target in specialist_roles.items()
             ))
 
-            # 4. Collect results from all specialists
+            # 4. Collect + verify results from all specialists
             results: dict[str, dict] = {}
             for target, response in dispatched:
-                if response is not None and response.status_code == 200:
-                    try:
-                        results[target] = response.json()
-                    except Exception:
-                        results[target] = {"ok": False, "error": "invalid JSON"}
+                if response is None:
+                    results[target] = {"ok": False, "error": "no response"}
+                    continue
+                if response.status_code != 200:
+                    results[target] = {"ok": False, "error": f"HTTP {response.status_code}"}
+                    continue
+
+                try:
+                    raw_body = response.json()
+                except Exception:
+                    results[target] = {"ok": False, "error": "invalid JSON"}
+                    continue
+
+                # 验签 Specialist 返回的 SignedAgentMessage
+                async with runtime.http_client_factory() as vfy_client:
+                    vfy = await verify_agent_message(
+                        message=raw_body,
+                        nonce_store=runtime.nonce_store,
+                        http_client=vfy_client,
+                        cache=runtime.cache,
+                        config=VerificationConfig(profile=TEST_PROFILE),
+                        resolver_config=MetadataResolverConfig(
+                            profile=TEST_PROFILE,
+                            registry_url=settings.registry_base_url,
+                        ),
+                        now=datetime.now(timezone.utc),
+                    )
+
+                if vfy.ok and vfy.message:
+                    results[target] = vfy.message.payload if isinstance(vfy.message.payload, dict) else {"ok": False, "error": "invalid payload"}
+                    store.add_review_event(ReviewEvent(
+                        review_id=review.review_id,
+                        event_type="result_verified",
+                        from_agent=target,
+                        to_agent="coordinator-agent",
+                        verification_result="verified",
+                        payload_summary=f"signature verified, kid={vfy.kid}",
+                        created_at=utc_now(),
+                    ))
                 else:
-                    results[target] = {
-                        "ok": False,
-                        "error": f"HTTP {response.status_code}" if response else "no response",
-                    }
+                    results[target] = {"ok": False, "error": f"VERIFICATION_FAILED: {vfy.code}"}
+                    store.add_review_event(ReviewEvent(
+                        review_id=review.review_id,
+                        event_type="result_verification_failed",
+                        from_agent=target,
+                        to_agent="coordinator-agent",
+                        verification_result="rejected",
+                        payload_summary=f"code={vfy.code}",
+                        reason=vfy.reason,
+                        created_at=utc_now(),
+                    ))
 
             # 5. Parse findings from each specialist and save
             all_findings: dict[str, list[dict]] = {
@@ -427,6 +469,15 @@ def create_agent_app(
         # Parse body — handle both AgentTask and AgentTaskResult
         task = _parse_incoming(raw_body, role)
         result = await _process_verified_task(runtime, task, source_id, verification)
+
+        # 签名返回结果，防止被中间人篡改
+        if runtime.agent is not None:
+            signed = await runtime.agent.sign_message(
+                payload=result.model_dump(mode="json"),
+                recipient=source_id,
+                message_type="task.result",
+            )
+            return JSONResponse(signed.model_dump(mode="json"))
         return JSONResponse(result.model_dump(mode="json"))
 
     return app
