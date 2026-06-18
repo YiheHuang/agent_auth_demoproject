@@ -311,55 +311,113 @@ def _html() -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Code Review & Security Audit</title>
 <style>
-:root{--bg:#f3f1ea;--panel:#fffdf7;--ink:#1f2a2e;--accent:#b14d2b;--line:#d9d0c4;--good:#1b7f5a;--bad:#a12d2d;--crit:#d32f2f;--high:#e65100;--med:#f57c00;--low:#6d8b3a;--info:#546e7a;}
-body{margin:0;font-family:Georgia,"Microsoft YaHei",serif;background:linear-gradient(180deg,#efe8dc 0%,#f7f4ee 100%);color:var(--ink);}
-.wrap{max-width:1500px;margin:0 auto;padding:20px;}
-h1{margin:0 0 14px;font-size:36px;}
-.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;margin-bottom:16px;}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 10px 25px rgba(68,50,24,.07);}
-.panel h2{margin:0 0 10px;font-size:20px;}
-input,textarea,button{width:100%;box-sizing:border-box;border-radius:10px;border:1px solid var(--line);padding:9px 11px;font:inherit;}
-textarea{min-height:200px;resize:vertical;font-family:'Cascadia Code','Fira Code',Consolas,monospace;font-size:13px;}
-button{background:var(--ink);color:white;cursor:pointer;margin-top:8px;}
-button.alt{background:var(--accent);}
-.badge{display:inline-block;padding:3px 9px;border-radius:999px;margin-right:6px;margin-bottom:4px;font-size:13px;color:white;}
-.badge.crit{background:var(--crit);} .badge.high{background:var(--high);}
-.badge.med{background:var(--med);} .badge.low{background:var(--low);} .badge.info{background:var(--info);}
-.score{display:inline-block;width:36px;height:36px;line-height:36px;text-align:center;border-radius:50%;color:white;font-weight:bold;margin:0 4px;}
-.score.good{background:var(--good);} .score.warn{background:var(--high);} .score.bad{background:var(--crit);}
+:root{
+  --bg:#f6f8fb;--surface:#ffffff;--surface-soft:#f8fafc;--ink:#172033;--muted:#667085;
+  --line:#e4e7ec;--line-strong:#cfd6df;--primary:#2563eb;--primary-dark:#1d4ed8;
+  --success:#12805c;--danger:#b42318;--warning:#b54708;--violet:#6941c6;--teal:#0e9384;
+  --shadow:0 16px 40px rgba(15,23,42,.08);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Arial,sans-serif;
+  background:
+    radial-gradient(circle at top left,rgba(37,99,235,.08),transparent 32rem),
+    linear-gradient(180deg,#ffffff 0%,var(--bg) 30%,#eef3f8 100%);
+  color:var(--ink);font-size:14px;line-height:1.5;
+}
+.wrap{max-width:1480px;margin:0 auto;padding:28px 24px 36px;}
+.topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:20px;}
+h1{margin:0;font-size:30px;line-height:1.15;font-weight:750;letter-spacing:0;}
+.subtitle{margin-top:8px;color:var(--muted);max-width:720px;}
+.status-strip{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.86);padding:7px 11px;color:#344054;font-size:12px;font-weight:650;}
+.hero{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(340px,.85fr);gap:16px;margin-bottom:16px;}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;}
+.panel{background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:8px;padding:18px;box-shadow:var(--shadow);}
+.panel h2{margin:0;font-size:17px;line-height:1.25;font-weight:740;}
+.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px;}
+.panel-note{color:var(--muted);font-size:13px;margin-top:3px;}
+.field-stack{display:grid;gap:10px;}
+input,textarea,button{width:100%;border-radius:8px;border:1px solid var(--line-strong);padding:10px 12px;font:inherit;}
+input,textarea{background:#fff;color:var(--ink);outline:none;transition:border-color .16s ease,box-shadow .16s ease,background .16s ease;}
+input:focus,textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.13);}
+textarea{min-height:220px;resize:vertical;font-family:"Cascadia Code","Fira Code",Consolas,monospace;font-size:13px;line-height:1.55;}
+button{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-color:transparent;background:var(--primary);color:white;cursor:pointer;font-weight:700;transition:transform .12s ease,background .12s ease,box-shadow .12s ease;}
+button:hover{background:var(--primary-dark);box-shadow:0 8px 18px rgba(37,99,235,.18);transform:translateY(-1px);}
+button:disabled{background:#e4e7ec;color:#98a2b3;cursor:not-allowed;box-shadow:none;transform:none;}
+button.alt{background:#344054;} button.alt:hover{background:#1d2939;box-shadow:0 8px 18px rgba(52,64,84,.16);}
+button.danger{background:var(--danger);} button.danger:hover{background:#912018;box-shadow:0 8px 18px rgba(180,35,24,.16);}
+.actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.actions button{min-height:40px;margin:0;}
+.badge{display:inline-flex;align-items:center;min-height:22px;padding:2px 8px;border-radius:999px;margin-right:6px;margin-bottom:4px;font-size:12px;font-weight:700;color:#344054;background:#eef2f6;border:1px solid transparent;}
+.badge.good,.badge.completed{background:#e8f5ee;color:var(--success);}
+.badge.bad,.badge.failed,.badge.crit{background:#fee4e2;color:var(--danger);}
+.badge.high{background:#fff1e5;color:var(--warning);}
+.badge.med{background:#fff8d6;color:#854a0e;}
+.badge.low{background:#e8f5ee;color:var(--success);}
+.badge.info,.badge.in_review,.badge.analyzing,.badge.synthesizing{background:#eaf1ff;color:var(--primary-dark);}
+.score{display:inline-flex;width:46px;height:42px;align-items:center;justify-content:center;border-radius:8px;font-weight:800;margin-right:8px;background:#fff;border:1px solid var(--line-strong);box-shadow:inset 4px 0 0 var(--primary);}
+.score.good{color:var(--success);box-shadow:inset 4px 0 0 var(--success);}
+.score.warn{color:var(--warning);box-shadow:inset 4px 0 0 var(--warning);}
+.score.bad{color:var(--danger);box-shadow:inset 4px 0 0 var(--danger);}
 ul{list-style:none;padding:0;margin:0;}
-li{padding:9px 0;border-top:1px solid #eee1d1;}
+li{padding:12px 0;border-top:1px solid var(--line);}
 li:first-child{border-top:none;}
-.muted{color:#7c7468;font-size:13px;}
-.good{color:var(--good);} .bad{color:var(--bad);}
-pre{white-space:pre-wrap;word-break:break-word;background:#f5efe5;padding:10px;border-radius:10px;font-size:12px;}
-.scroll{max-height:400px;overflow:auto;}
-.pager{display:flex;gap:8px;align-items:center;margin-top:10px;}
-.pager button{width:auto;margin-top:0;padding:7px 12px;}
-.finding-card{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px;background:#faf8f2;}
-.finding-card .title{font-weight:bold;margin-bottom:4px;}
-.actions button{margin-right:6px;width:auto;}
-code{background:#f0ece0;padding:2px 6px;border-radius:4px;font-size:12px;}
-@media(max-width:1000px){.hero,.grid2{grid-template-columns:1fr;}h1{font-size:28px;}}
+.muted{color:var(--muted);font-size:13px;}
+.good{color:var(--success);} .bad{color:var(--danger);}
+pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#dbeafe;padding:12px;border-radius:8px;font-size:12px;line-height:1.55;margin:12px 0 0;}
+.scroll{max-height:430px;overflow:auto;padding-right:2px;}
+.pager{display:flex;gap:8px;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);}
+.pager button{width:auto;margin-top:0;padding:7px 12px;min-width:74px;}
+.finding-card{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--surface-soft);}
+.finding-card .title{font-weight:750;margin-bottom:5px;}
+.review-row{display:grid;gap:6px;}
+.row-title{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.row-meta{display:flex;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:13px;}
+.detail-section{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
+.detail-section h3,.detail-section h4{margin:0 0 10px;}
+.empty{display:flex;align-items:center;justify-content:center;min-height:96px;border:1px dashed var(--line-strong);border-radius:8px;background:var(--surface-soft);color:var(--muted);}
+code{background:#eef2f6;padding:2px 6px;border-radius:4px;font-size:12px;}
+@media(max-width:1040px){.hero,.grid2{grid-template-columns:1fr}.topbar{align-items:flex-start;flex-direction:column}.status-strip{justify-content:flex-start}h1{font-size:26px}}
+@media(max-width:640px){.wrap{padding:20px 14px 28px}.panel{padding:14px}.actions{grid-template-columns:1fr}.row-title{align-items:flex-start;flex-direction:column}textarea{min-height:180px}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>Code Review & Security Audit</h1>
+<header class="topbar">
+  <div>
+    <h1>Agent Auth Code Review Console</h1>
+    <div class="subtitle">一个用于演示 Agent 身份认证、消息签名、能力校验和多 Agent 代码审查协作的控制台。</div>
+  </div>
+  <div class="status-strip">
+    <span class="pill">HTTP 签名</span>
+    <span class="pill">Nonce 防重放</span>
+    <span class="pill">Capability 校验</span>
+  </div>
+</header>
 <div class="hero">
 <section class="panel">
-  <h2>提交代码审查</h2>
-  <div class="muted">提交代码后，5 个 LLM Agent 将协作完成多维度专业审查。</div>
-  <input id="title" placeholder="审查标题，如：Review auth_service.py"/>
-  <textarea id="code" placeholder="粘贴代码..."></textarea>
-  <input id="lang-hint" placeholder="语言提示（可选，如 python）"/>
-  <button onclick="submitReview()">提交审查</button>
+  <div class="panel-head">
+    <div>
+      <h2>提交代码审查</h2>
+      <div class="panel-note">提交后，Coordinator 将调度 4 个专家 Agent 完成审查。</div>
+    </div>
+  </div>
+  <div class="field-stack">
+    <input id="title" placeholder="审查标题，如：Review auth_service.py"/>
+    <textarea id="code" placeholder="粘贴需要审查的代码..."></textarea>
+    <input id="lang-hint" placeholder="语言提示（可选，如 python）"/>
+  </div>
+  <button onclick="submitReview()" style="margin-top:12px;">提交审查</button>
   <div id="submit-status" class="muted" style="margin-top:8px;"></div>
 </section>
 <section class="panel">
-  <h2>攻击演示面板</h2>
-  <div class="muted">攻击场景独立运行，不污染审查数据。</div>
+  <div class="panel-head">
+    <div>
+      <h2>攻击演示面板</h2>
+      <div class="panel-note">验证 SDK 如何拒绝未注册、篡改、重放和越权请求。</div>
+    </div>
+  </div>
   <div class="actions">
     <button class="alt" onclick="runScenario('unregistered')">未注册 Agent 攻击</button>
     <button class="alt" onclick="runScenario('tampered')">审查结果篡改</button>
@@ -368,24 +426,24 @@ code{background:#f0ece0;padding:2px 6px;border-radius:4px;font-size:12px;}
     <button class="alt" onclick="runScenario('capability-escalation')">能力越权攻击</button>
   </div>
   <pre id="scenario-output">等待执行场景...</pre>
-  <button onclick="clearAllData()" style="background:#a12d2d;margin-top:12px;">清空全部数据</button>
+  <button class="danger" onclick="clearAllData()" style="margin-top:12px;">清空全部数据</button>
 </section>
 </div>
 <div class="grid2">
 <section class="panel">
-  <h2>审查列表</h2>
+  <div class="panel-head"><div><h2>审查列表</h2><div class="panel-note">最近提交的代码审查任务。</div></div></div>
   <div id="reviews" class="scroll"></div>
 </section>
 <section class="panel">
-  <h2>审查详情 & 报告</h2>
-  <div id="detail" class="scroll muted">点击左侧审查查看详情。</div>
+  <div class="panel-head"><div><h2>审查详情 & 报告</h2><div class="panel-note">查看评分、发现项和认证时间线。</div></div></div>
+  <div id="detail" class="scroll"><div class="empty">点击左侧审查查看详情</div></div>
 </section>
 <section class="panel">
-  <h2>Agent 注册表</h2>
+  <div class="panel-head"><div><h2>Agent 注册表</h2><div class="panel-note">来自本地 registry 的 Agent 元数据。</div></div></div>
   <div id="registry" class="scroll"></div>
 </section>
 <section class="panel">
-  <h2>认证事件</h2>
+  <div class="panel-head"><div><h2>认证事件</h2><div class="panel-note">签名验证、拒绝原因和攻击演示结果。</div></div></div>
   <div id="auth-events" class="scroll"></div>
 </section>
 </div>
@@ -430,11 +488,13 @@ async function loadReviews(){
     <div class="muted">共 ${data.total} 条审查。</div>
     <ul>${items.map(r=>`
       <li>
-        <div><strong>${r.title}</strong> <span class="badge ${r.status==='completed'?'good':(r.status==='failed'?'bad':'info')}">${r.status}</span></div>
-        <div class="muted">语言: ${r.language} | 评分: ${r.overall_score??'—'}/10 | ${r.updated_at?.slice(0,19)||''}</div>
-        <button onclick="selectReview('${r.review_id}')">查看详情</button>
+        <div class="review-row">
+          <div class="row-title"><strong>${r.title}</strong><span class="badge ${r.status}">${r.status}</span></div>
+          <div class="row-meta"><span>语言: ${r.language}</span><span>评分: ${r.overall_score??'-'}/10</span><span>${r.updated_at?.slice(0,19)||''}</span></div>
+          <button onclick="selectReview('${r.review_id}')">查看详情</button>
+        </div>
       </li>
-    `).join('')||'<li class="muted">暂无审查</li>'}</ul>
+    `).join('')||'<li><div class="empty">暂无审查</div></li>'}</ul>
     <div class="pager">
       <button onclick="changeReviewsPage(-1)" ${data.page<=1?'disabled':''}>上一页</button>
       <span class="muted">${data.page}/${data.page_count}</span>
@@ -451,16 +511,16 @@ async function loadDetail(id){
   const r=data.review,f=data.findings,e=data.events;
   const sevBadge=s=>`<span class="badge ${s==='critical'?'crit':s==='high'?'high':s==='medium'?'med':s==='low'?'low':'info'}">${s}</span>`;
   const scoreClass=v=>v>=8?'good':v>=5?'warn':'bad';
-  const domainEmoji={architecture:'🏗️',security:'🔒',performance:'⚡',compliance:'📋'};
+  const domainName={architecture:'架构审查',security:'安全审查',performance:'性能审查',compliance:'合规审查'};
 
   // Group findings by agent_role
   const byRole={};
   f.forEach(fi=>{const k=fi.agent_role;if(!byRole[k])byRole[k]=[];byRole[k].push(fi);});
 
-  let findingsHtml='<h3>审查发现</h3>';
-  if(Object.keys(byRole).length===0)findingsHtml+='<div class="muted">暂无发现。</div>';
+  let findingsHtml='<div class="detail-section"><h3>审查发现</h3>';
+  if(Object.keys(byRole).length===0)findingsHtml+='<div class="empty">暂无发现</div>';
   Object.entries(byRole).forEach(([role,items])=>{
-    findingsHtml+=`<h4>${domainEmoji[role]||''} ${role.toUpperCase()} (${items.length})</h4>`;
+    findingsHtml+=`<h4>${domainName[role]||role} (${items.length})</h4>`;
     items.forEach(fi=>findingsHtml+=`
       <div class="finding-card">
         <div class="title">${sevBadge(fi.severity)} ${fi.title}</div>
@@ -471,20 +531,24 @@ async function loadDetail(id){
         ${fi.line_numbers?`<div class="muted">行号: ${fi.line_numbers}</div>`:''}
       </div>`);
   });
+  findingsHtml+='</div>';
 
-  let scoresHtml='<h3>评分</h3>';
+  let scoresHtml='<div class="detail-section"><h3>评分</h3>';
   if(r.overall_score){
     scoresHtml+=`<div><span class="score ${scoreClass(r.overall_score)}">${r.overall_score}</span> 综合评分</div>`;
+  }else{
+    scoresHtml+='<div class="muted">暂未生成评分。</div>';
   }
+  scoresHtml+='</div>';
 
   document.getElementById('detail').innerHTML=`
     <h3>${r.title}</h3>
-    <div class="muted">ID: ${r.review_id} | 语言: ${r.language} | 状态: ${r.status}</div>
+    <div class="row-meta"><span>ID: ${r.review_id}</span><span>语言: ${r.language}</span><span>状态: ${r.status}</span></div>
     ${r.coordinator_analysis?`<div class="muted">分析: ${r.coordinator_analysis}</div>`:''}
     ${scoresHtml}
     ${findingsHtml}
-    <h3>事件时间线 (${e.length})</h3>
-    <ul>${e.map(ev=>`<li><div><strong>${ev.event_type}</strong></div><div class="muted">${ev.from_agent} → ${ev.to_agent} | ${ev.verification_result}</div><div>${ev.payload_summary}</div>${ev.reason?`<div class="muted">${ev.reason}</div>`:''}</li>`).join('')||'<li class="muted">无事件</li>'}</ul>`;
+    <div class="detail-section"><h3>事件时间线 (${e.length})</h3>
+    <ul>${e.map(ev=>`<li><div><strong>${ev.event_type}</strong></div><div class="row-meta"><span>${ev.from_agent} -> ${ev.to_agent}</span><span>${ev.verification_result}</span></div><div>${ev.payload_summary}</div>${ev.reason?`<div class="muted">${ev.reason}</div>`:''}</li>`).join('')||'<li><div class="empty">无事件</div></li>'}</ul></div>`;
 }
 
 async function loadRegistry(){
@@ -492,7 +556,7 @@ async function loadRegistry(){
   const agents=data.agents||[];
   document.getElementById('registry').innerHTML=`
     <div class="muted">共 ${data.total} 个 agent。</div>
-    ${agents.map(a=>`<div class="finding-card"><div><strong>${a.metadata.name}</strong></div><div class="muted">${a.agent_id}</div><div class="muted">能力: ${(a.metadata.capabilities||[]).join(', ')}</div></div>`).join('')||'<div class="muted">无 agent</div>'}
+    ${agents.map(a=>`<div class="finding-card"><div><strong>${a.metadata.name}</strong></div><div class="muted">${a.agent_id}</div><div class="muted">能力: ${(a.metadata.capabilities||[]).join(', ')}</div></div>`).join('')||'<div class="empty">无 agent</div>'}
     <div class="pager">
       <button onclick="changeRegistryPage(-1)" ${data.page<=1?'disabled':''}>上一页</button><span class="muted">${data.page}/${data.page_count}</span>
       <button onclick="changeRegistryPage(1)" ${data.page>=data.page_count?'disabled':''}>下一页</button>
@@ -506,7 +570,7 @@ async function loadAuthEvents(){
   const events=data.items||[];
   document.getElementById('auth-events').innerHTML=`
     <div class="muted">共 ${data.total} 条认证事件。</div>
-    <ul>${events.map(e=>`<li><div><strong class="${e.result==='verified'?'good':'bad'}">${e.result}</strong> @ ${e.target_agent}</div><div class="muted">${e.source_agent_id||'unknown'} | ${e.error_code||'OK'}</div><div>${e.detail}</div></li>`).join('')||'<li class="muted">暂无事件</li>'}</ul>
+    <ul>${events.map(e=>`<li><div><span class="badge ${e.result==='verified'?'good':'bad'}">${e.result}</span><strong>${e.target_agent}</strong></div><div class="muted">${e.source_agent_id||'unknown'} | ${e.error_code||'OK'}</div><div>${e.detail}</div></li>`).join('')||'<li><div class="empty">暂无事件</div></li>'}</ul>
     <div class="pager">
       <button onclick="changeAuthPage(-1)" ${data.page<=1?'disabled':''}>上一页</button><span class="muted">${data.page}/${data.page_count}</span>
       <button onclick="changeAuthPage(1)" ${data.page>=data.page_count?'disabled':''}>下一页</button>
